@@ -32,7 +32,7 @@
 #include <boost/intrusive/list.hpp>
 #include <boost/utility.hpp>
 #include <functional>
-#include <event.h>  // libevent
+#include "thirdparty/libevent/event.h"  // libevent
 #include <errno.h>
 #include <math.h>
 #include <atomic>

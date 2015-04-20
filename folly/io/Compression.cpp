@@ -17,23 +17,23 @@
 #include <folly/io/Compression.h>
 
 #if FOLLY_HAVE_LIBLZ4
-#include <lz4.h>
-#include <lz4hc.h>
+#include "thirdparty/lz4/lz4.h"
+#include "thirdparty/lz4/llz4hc.h"
 #endif
 
-#include <glog/logging.h>
+#include "thirdparty/glog/logging.h"
 
 #if FOLLY_HAVE_LIBSNAPPY
-#include <snappy.h>
-#include <snappy-sinksource.h>
+#include "thirdparty/snappy/snappy.h"
+#include "thirdparty/snappy/snappy-sinksource.h"
 #endif
 
 #if FOLLY_HAVE_LIBZ
-#include <zlib.h>
+#include "thirdparty/zlib/zlib.h"
 #endif
 
 #if FOLLY_HAVE_LIBLZMA
-#include <lzma.h>
+#include "thirdparty/lzma/lzma.h"
 #endif
 
 #include <folly/Conv.h>

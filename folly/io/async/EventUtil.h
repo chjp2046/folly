@@ -20,7 +20,7 @@
  */
 #pragma once
 
-#include <event.h>  // libevent
+#include "thirdparty/libevent/event.h"  // libevent
 
 namespace folly {
 

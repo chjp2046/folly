@@ -23,7 +23,7 @@
 #include <folly/io/async/TimeoutManager.h>
 
 #include <boost/noncopyable.hpp>
-#include <event.h>
+#include "thirdparty/libevent/event.h"
 #include <memory>
 
 namespace folly {

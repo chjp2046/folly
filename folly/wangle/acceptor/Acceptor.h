@@ -17,7 +17,7 @@
 #include <folly/wangle/acceptor/TransportInfo.h>
 
 #include <chrono>
-#include <event.h>
+#include "thirdparty/libevent/event.h"
 #include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/AsyncServerSocket.h>
 #include <folly/io/async/AsyncUDPServerSocket.h>
