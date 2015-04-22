@@ -35,7 +35,8 @@ cc_library(
 		'-std=gnu++0x',
 		'-DHAVE_CONFIG_H'
 	],
-	warning = 'no'
+	warning = 'no',
+    link_all_symbols=1
 )
 
 cc_binary(
