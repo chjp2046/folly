@@ -33,7 +33,7 @@
 #endif
 
 #if FOLLY_HAVE_LIBLZMA
-#include "thirdparty/lzma/lzma.h"
+#include <lzma.h>
 #endif
 
 #include <folly/Conv.h>
