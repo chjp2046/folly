@@ -265,7 +265,7 @@ struct StaticMeta {
     ThreadEntry* threadEntry = getThreadEntry();
 
     DCHECK_EQ(ptr, &meta);
-    DCHECK_GT(threadEntry->elementsCapacity, 0);
+    DCHECK_GT(threadEntry->elementsCapacity, static_cast<size_t>(0));
 #else
     ThreadEntry* threadEntry = static_cast<ThreadEntry*>(ptr);
 #endif
