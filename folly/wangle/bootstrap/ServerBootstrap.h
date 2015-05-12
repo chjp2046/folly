@@ -17,11 +17,11 @@
 
 #include <folly/wangle/bootstrap/ServerBootstrap-inl.h>
 #include <folly/Baton.h>
-#include <folly/wangle/channel/ChannelPipeline.h>
+#include <folly/wangle/channel/Pipeline.h>
 
 namespace folly {
 
-typedef folly::wangle::ChannelPipeline<
+typedef folly::wangle::Pipeline<
   folly::IOBufQueue&, std::unique_ptr<folly::IOBuf>> DefaultPipeline;
 
 /*
@@ -30,7 +30,7 @@ typedef folly::wangle::ChannelPipeline<
  * accepting threads, any number of accepting sockets, a pool of
  * IO-worker threads, and connection pool for each IO thread for you.
  *
- * The output is given as a ChannelPipeline template: given a
+ * The output is given as a Pipeline template: given a
  * PipelineFactory, it will create a new pipeline for each connection,
  * and your server can handle the incoming bytes.
  *
@@ -52,9 +52,7 @@ class ServerBootstrap {
     join();
   }
 
-  typedef wangle::ChannelPipeline<
-   void*,
-   std::exception> AcceptPipeline;
+  typedef wangle::Pipeline<void*> AcceptPipeline;
   /*
    * Pipeline used to add connections to event bases.
    * This is used for UDP or for load balancing
@@ -286,6 +284,13 @@ class ServerBootstrap {
       }
       sockets_->clear();
     }
+    if (!stopped_) {
+      stopped_ = true;
+      // stopBaton_ may be null if ServerBootstrap has been std::move'd
+      if (stopBaton_) {
+        stopBaton_->post();
+      }
+    }
   }
 
   void join() {
@@ -294,6 +299,13 @@ class ServerBootstrap {
     }
     if (io_group_) {
       io_group_->join();
+    }
+  }
+
+  void waitForStop() {
+    if (!stopped_) {
+      CHECK(stopBaton_);
+      stopBaton_->wait();
     }
   }
 
@@ -330,6 +342,10 @@ class ServerBootstrap {
     std::make_shared<DefaultAcceptPipelineFactory>()};
   std::shared_ptr<ServerSocketFactory> socketFactory_{
     std::make_shared<AsyncServerSocketFactory>()};
+
+  std::unique_ptr<folly::Baton<>> stopBaton_{
+    folly::make_unique<folly::Baton<>>()};
+  bool stopped_{false};
 };
 
 } // namespace

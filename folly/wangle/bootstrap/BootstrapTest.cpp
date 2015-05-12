@@ -16,7 +16,7 @@
 
 #include "folly/wangle/bootstrap/ServerBootstrap.h"
 #include "folly/wangle/bootstrap/ClientBootstrap.h"
-#include "folly/wangle/channel/ChannelHandler.h"
+#include "folly/wangle/channel/Handler.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -25,29 +25,32 @@
 using namespace folly::wangle;
 using namespace folly;
 
-typedef ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> Pipeline;
+typedef Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> BytesPipeline;
 
-typedef ServerBootstrap<Pipeline> TestServer;
-typedef ClientBootstrap<Pipeline> TestClient;
+typedef ServerBootstrap<BytesPipeline> TestServer;
+typedef ClientBootstrap<BytesPipeline> TestClient;
 
-class TestClientPipelineFactory : public PipelineFactory<Pipeline> {
+class TestClientPipelineFactory : public PipelineFactory<BytesPipeline> {
  public:
-  Pipeline* newPipeline(std::shared_ptr<AsyncSocket> sock) {
-    CHECK(sock->good());
-
+  std::unique_ptr<BytesPipeline, folly::DelayedDestruction::Destructor>
+  newPipeline(std::shared_ptr<AsyncSocket> sock) {
     // We probably aren't connected immedately, check after a small delay
     EventBaseManager::get()->getEventBase()->tryRunAfterDelay([sock](){
+      CHECK(sock->good());
       CHECK(sock->readable());
     }, 100);
     return nullptr;
   }
 };
 
-class TestPipelineFactory : public PipelineFactory<Pipeline> {
+class TestPipelineFactory : public PipelineFactory<BytesPipeline> {
  public:
-  Pipeline* newPipeline(std::shared_ptr<AsyncSocket> sock) {
+  std::unique_ptr<BytesPipeline, folly::DelayedDestruction::Destructor> newPipeline(
+    std::shared_ptr<AsyncSocket> sock) {
+
     pipelines++;
-    return new Pipeline();
+    return std::unique_ptr<BytesPipeline, folly::DelayedDestruction::Destructor>(
+      new BytesPipeline());
   }
   std::atomic<int> pipelines{0};
 };
@@ -267,28 +270,26 @@ TEST(Bootstrap, ExistingSocket) {
 
 std::atomic<int> connections{0};
 
-class TestHandlerPipeline
-    : public ChannelHandlerAdapter<void*,
-                                   std::exception> {
+class TestHandlerPipeline : public InboundHandler<void*> {
  public:
   void read(Context* ctx, void* conn) {
     connections++;
     return ctx->fireRead(conn);
   }
-
-  Future<void> write(Context* ctx, std::exception e) {
-    return ctx->fireWrite(e);
-  }
 };
 
 template <typename HandlerPipeline>
 class TestHandlerPipelineFactory
-    : public PipelineFactory<ServerBootstrap<Pipeline>::AcceptPipeline> {
+    : public PipelineFactory<ServerBootstrap<BytesPipeline>::AcceptPipeline> {
  public:
-  ServerBootstrap<Pipeline>::AcceptPipeline* newPipeline(std::shared_ptr<AsyncSocket>) {
-    auto pipeline = new ServerBootstrap<Pipeline>::AcceptPipeline;
-    auto handler = std::make_shared<HandlerPipeline>();
-      pipeline->addBack(ChannelHandlerPtr<HandlerPipeline>(handler));
+  std::unique_ptr<ServerBootstrap<BytesPipeline>::AcceptPipeline,
+                  folly::DelayedDestruction::Destructor>
+  newPipeline(std::shared_ptr<AsyncSocket>) {
+
+    std::unique_ptr<ServerBootstrap<BytesPipeline>::AcceptPipeline,
+                    folly::DelayedDestruction::Destructor> pipeline(
+                      new ServerBootstrap<BytesPipeline>::AcceptPipeline);
+    pipeline->addBack(HandlerPipeline());
     return pipeline;
   }
 };
@@ -317,16 +318,10 @@ TEST(Bootstrap, LoadBalanceHandler) {
   CHECK(connections == 1);
 }
 
-class TestUDPPipeline
-    : public ChannelHandlerAdapter<void*,
-                                   std::exception> {
+class TestUDPPipeline : public InboundHandler<void*> {
  public:
   void read(Context* ctx, void* conn) {
     connections++;
-  }
-
-  Future<void> write(Context* ctx, std::exception e) {
-    return ctx->fireWrite(e);
   }
 };
 

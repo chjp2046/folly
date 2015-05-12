@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <folly/wangle/codec/StringCodec.h>
+#include <folly/wangle/codec/ByteToMessageCodec.h>
 #include <folly/wangle/service/ClientDispatcher.h>
 #include <folly/wangle/service/ServerDispatcher.h>
 #include <folly/wangle/service/Service.h>
@@ -24,7 +25,15 @@ namespace folly {
 
 using namespace wangle;
 
-typedef ChannelPipeline<IOBufQueue&, std::string> Pipeline;
+typedef Pipeline<IOBufQueue&, std::string> ServicePipeline;
+
+class SimpleDecode : public ByteToMessageCodec {
+ public:
+  virtual std::unique_ptr<IOBuf> decode(
+    Context* ctx, IOBufQueue& buf, size_t&) {
+    return buf.move();
+  }
+};
 
 class EchoService : public Service<std::string, std::string> {
  public:
@@ -42,17 +51,18 @@ class EchoIntService : public Service<std::string, int> {
 
 template <typename Req, typename Resp>
 class ServerPipelineFactory
-    : public PipelineFactory<Pipeline> {
+    : public PipelineFactory<ServicePipeline> {
  public:
 
-  Pipeline* newPipeline(
-      std::shared_ptr<AsyncSocket> socket) override {
-    auto pipeline = new Pipeline();
+  std::unique_ptr<ServicePipeline, folly::DelayedDestruction::Destructor>
+  newPipeline(std::shared_ptr<AsyncSocket> socket) override {
+    std::unique_ptr<ServicePipeline, folly::DelayedDestruction::Destructor> pipeline(
+      new ServicePipeline());
     pipeline->addBack(AsyncSocketHandler(socket));
+    pipeline->addBack(SimpleDecode());
     pipeline->addBack(StringCodec());
     pipeline->addBack(SerialServerDispatcher<Req, Resp>(&service_));
     pipeline->finalize();
-    pipeline->template getHandler<AsyncSocketHandler>(0)->attachReadCallback();
     return pipeline;
   }
 
@@ -61,16 +71,17 @@ class ServerPipelineFactory
 };
 
 template <typename Req, typename Resp>
-class ClientPipelineFactory : public PipelineFactory<Pipeline> {
+class ClientPipelineFactory : public PipelineFactory<ServicePipeline> {
  public:
 
-  Pipeline* newPipeline(
-      std::shared_ptr<AsyncSocket> socket) override {
-    auto pipeline = new Pipeline();
+  std::unique_ptr<ServicePipeline, folly::DelayedDestruction::Destructor>
+  newPipeline(std::shared_ptr<AsyncSocket> socket) override {
+    std::unique_ptr<ServicePipeline, folly::DelayedDestruction::Destructor> pipeline(
+      new ServicePipeline());
     pipeline->addBack(AsyncSocketHandler(socket));
+    pipeline->addBack(SimpleDecode());
     pipeline->addBack(StringCodec());
-    pipeline->template getHandler<AsyncSocketHandler>(0)->attachReadCallback();
-
+    pipeline->finalize();
     return pipeline;
    }
 };
@@ -101,14 +112,14 @@ TEST(Wangle, ClientServerTest) {
   int port = 1234;
   // server
 
-  ServerBootstrap<Pipeline> server;
+  ServerBootstrap<ServicePipeline> server;
   server.childPipeline(
     std::make_shared<ServerPipelineFactory<std::string, std::string>>());
   server.bind(port);
 
   // client
-  auto client = std::make_shared<ClientBootstrap<Pipeline>>();
-  ClientServiceFactory<Pipeline, std::string, std::string> serviceFactory;
+  auto client = std::make_shared<ClientBootstrap<ServicePipeline>>();
+  ClientServiceFactory<ServicePipeline, std::string, std::string> serviceFactory;
   client->pipelineFactory(
     std::make_shared<ClientPipelineFactory<std::string, std::string>>());
   SocketAddress addr("127.0.0.1", port);
@@ -194,7 +205,7 @@ TEST(Wangle, SuperComplexFilterTest) {
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   google::InitGoogleLogging(argv[0]);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   return RUN_ALL_TESTS();
 }

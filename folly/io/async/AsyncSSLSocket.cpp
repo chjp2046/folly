@@ -56,9 +56,6 @@ using folly::AsyncSocketException;
 using folly::AsyncSSLSocket;
 using folly::Optional;
 
-/** Try to avoid calling SSL_write() for buffers smaller than this: */
-size_t MIN_WRITE_SIZE = 1500;
-
 // We have one single dummy SSL context so that we can implement attach
 // and detach methods in a thread safe fashion without modifying opnessl.
 static SSLContext *dummyCtx = nullptr;
@@ -67,6 +64,10 @@ static SpinLock dummyCtxLock;
 // Numbers chosen as to not collide with functions in ssl.h
 const uint8_t TASYNCSSLSOCKET_F_PERFORM_READ = 90;
 const uint8_t TASYNCSSLSOCKET_F_PERFORM_WRITE = 91;
+
+// If given min write size is less than this, buffer will be allocated on
+// stack, otherwise it is allocated on heap
+const size_t MAX_STACK_BUF_SIZE = 2048;
 
 // This converts "illegal" shutdowns into ZERO_RETURN
 inline bool zero_return(int error, int rc) {
@@ -223,8 +224,7 @@ void setup_SSL_CTX(SSL_CTX *ctx) {
 
 BIO_METHOD eorAwareBioMethod;
 
-__attribute__((__constructor__))
-void initEorBioMethod(void) {
+void* initEorBioMethod(void) {
   memcpy(&eorAwareBioMethod, BIO_s_socket(), sizeof(eorAwareBioMethod));
   // override the bwrite method for MSG_EOR support
   eorAwareBioMethod.bwrite = AsyncSSLSocket::eorAwareBioWrite;
@@ -233,6 +233,10 @@ void initEorBioMethod(void) {
   // set here. openssl code seems to be checking ".type == BIO_TYPE_SOCKET" and
   // then have specific handlings. The eorAwareBioWrite should be compatible
   // with the one in openssl.
+
+  // Return something here to enable AsyncSSLSocket to call this method using
+  // a function-scoped static.
+  return nullptr;
 }
 
 } // anonymous namespace
@@ -253,7 +257,7 @@ AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext> &ctx,
     AsyncSocket(evb),
     ctx_(ctx),
     handshakeTimeout_(this, evb) {
-  setup_SSL_CTX(ctx_->getSSLCtx());
+  init();
 }
 
 /**
@@ -265,7 +269,7 @@ AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext>& ctx,
     server_(server),
     ctx_(ctx),
     handshakeTimeout_(this, evb) {
-  setup_SSL_CTX(ctx_->getSSLCtx());
+  init();
   if (server) {
     SSL_CTX_set_info_callback(ctx_->getSSLCtx(),
                               AsyncSSLSocket::sslInfoCallback);
@@ -280,11 +284,8 @@ AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext>& ctx,
 AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext> &ctx,
                                  EventBase* evb,
                                  const std::string& serverName) :
-    AsyncSocket(evb),
-    ctx_(ctx),
-    handshakeTimeout_(this, evb),
-    tlsextHostname_(serverName) {
-  setup_SSL_CTX(ctx_->getSSLCtx());
+    AsyncSSLSocket(ctx, evb) {
+  tlsextHostname_ = serverName;
 }
 
 /**
@@ -294,11 +295,8 @@ AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext> &ctx,
 AsyncSSLSocket::AsyncSSLSocket(const shared_ptr<SSLContext>& ctx,
                                  EventBase* evb, int fd,
                                  const std::string& serverName) :
-    AsyncSocket(evb, fd),
-    ctx_(ctx),
-    handshakeTimeout_(this, evb),
-    tlsextHostname_(serverName) {
-  setup_SSL_CTX(ctx_->getSSLCtx());
+    AsyncSSLSocket(ctx, evb, fd, false) {
+  tlsextHostname_ = serverName;
 }
 #endif
 
@@ -307,6 +305,13 @@ AsyncSSLSocket::~AsyncSSLSocket() {
           << ", evb=" << eventBase_ << ", fd=" << fd_
           << ", state=" << int(state_) << ", sslState="
           << sslState_ << ", events=" << eventFlags_ << ")";
+}
+
+void AsyncSSLSocket::init() {
+  // Do this here to ensure we initialize this once before any use of
+  // AsyncSSLSocket instances and not as part of library load.
+  static const auto eorAwareBioMethodInitializer = initEorBioMethod();
+  setup_SSL_CTX(ctx_->getSSLCtx());
 }
 
 void AsyncSSLSocket::closeNow() {
@@ -1174,6 +1179,17 @@ ssize_t AsyncSSLSocket::performWrite(const iovec* vec,
   bool cork = isSet(flags, WriteFlags::CORK);
   CorkGuard guard(fd_, count > 1, cork, &corked_);
 
+  // Declare a buffer used to hold small write requests.  It could point to a
+  // memory block either on stack or on heap. If it is on heap, we release it
+  // manually when scope exits
+  char* combinedBuf{nullptr};
+  SCOPE_EXIT {
+    // Note, always keep this check consistent with what we do below
+    if (combinedBuf != nullptr && minWriteSize_ > MAX_STACK_BUF_SIZE) {
+      delete[] combinedBuf;
+    }
+  };
+
   *countWritten = 0;
   *partialWritten = 0;
   ssize_t totalWritten = 0;
@@ -1193,7 +1209,7 @@ ssize_t AsyncSSLSocket::performWrite(const iovec* vec,
     ssize_t bytes;
     errno = 0;
     uint32_t buffersStolen = 0;
-    if ((len < MIN_WRITE_SIZE) && ((i + 1) < count)) {
+    if ((len < minWriteSize_) && ((i + 1) < count)) {
       // Combine this buffer with part or all of the next buffers in
       // order to avoid really small-grained calls to SSL_write().
       // Each call to SSL_write() produces a separate record in
@@ -1202,13 +1218,24 @@ ssize_t AsyncSSLSocket::performWrite(const iovec* vec,
       // header and the first part of the response body in two
       // separate SSL records (even if those two records are in
       // the same TCP packet).
-      char combinedBuf[MIN_WRITE_SIZE];
+
+      if (combinedBuf == nullptr) {
+        if (minWriteSize_ > MAX_STACK_BUF_SIZE) {
+          // Allocate the buffer on heap
+          combinedBuf = new char[minWriteSize_];
+        } else {
+          // Allocate the buffer on stack
+          combinedBuf = (char*)alloca(minWriteSize_);
+        }
+      }
+      assert(combinedBuf != nullptr);
+
       memcpy(combinedBuf, buf, len);
       do {
         // INVARIANT: i + buffersStolen == complete chunks serialized
         uint32_t nextIndex = i + buffersStolen + 1;
         bytesStolenFromNextBuffer = std::min(vec[nextIndex].iov_len,
-                                             MIN_WRITE_SIZE - len);
+                                             minWriteSize_ - len);
         memcpy(combinedBuf + len, vec[nextIndex].iov_base,
                bytesStolenFromNextBuffer);
         len += bytesStolenFromNextBuffer;
@@ -1219,7 +1246,7 @@ ssize_t AsyncSSLSocket::performWrite(const iovec* vec,
           bytesStolenFromNextBuffer = 0;
           buffersStolen++;
         }
-      } while ((i + buffersStolen + 1) < count && (len < MIN_WRITE_SIZE));
+      } while ((i + buffersStolen + 1) < count && (len < minWriteSize_));
       bytes = eorAwareSSLWrite(
         ssl_, combinedBuf, len,
         (isSet(flags, WriteFlags::EOR) && i + buffersStolen + 1 == count));

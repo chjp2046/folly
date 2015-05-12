@@ -16,15 +16,16 @@
 
 #pragma once
 
+#include <folly/wangle/rx/types.h> // must come first
 #include <folly/wangle/rx/Subject.h>
 #include <folly/wangle/rx/Subscription.h>
-#include <folly/wangle/rx/types.h>
 
 #include <folly/RWSpinLock.h>
 #include <folly/SmallLocks.h>
 #include <folly/ThreadLocal.h>
 #include <folly/small_vector.h>
 #include <folly/Executor.h>
+#include <folly/Memory.h>
 #include <map>
 #include <memory>
 

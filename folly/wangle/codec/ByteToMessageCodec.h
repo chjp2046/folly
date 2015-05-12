@@ -15,12 +15,12 @@
  */
 #pragma once
 
-#include <folly/wangle/channel/ChannelHandler.h>
+#include <folly/wangle/channel/Handler.h>
 
 namespace folly { namespace wangle {
 
 /**
- * A ChannelHandler which decodes bytes in a stream-like fashion from
+ * A Handler which decodes bytes in a stream-like fashion from
  * IOBufQueue to a  Message type.
  *
  * Frame detection
@@ -40,16 +40,13 @@ namespace folly { namespace wangle {
  * IOBufQueue.front(), without split() or pop_front().
  */
 class ByteToMessageCodec
-    : public BytesToBytesHandler {
+    : public InboundBytesToBytesHandler {
  public:
 
   virtual std::unique_ptr<IOBuf> decode(
     Context* ctx, IOBufQueue& buf, size_t&) = 0;
 
   void read(Context* ctx, IOBufQueue& q);
-
- private:
-  IOBufQueue q_;
 };
 
 }}

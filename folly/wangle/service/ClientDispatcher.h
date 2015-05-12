@@ -15,7 +15,7 @@
  */
 #pragma once
 
-#include <folly/wangle/channel/ChannelHandler.h>
+#include <folly/wangle/channel/Handler.h>
 #include <folly/wangle/service/Service.h>
 
 namespace folly { namespace wangle {
@@ -26,17 +26,15 @@ namespace folly { namespace wangle {
  * only one request is allowed at a time.
  */
 template <typename Pipeline, typename Req, typename Resp = Req>
-class SerialClientDispatcher : public ChannelHandlerAdapter<Req, Resp>
+class SerialClientDispatcher : public InboundHandler<Req>
                              , public Service<Req, Resp> {
  public:
 
-  typedef typename ChannelHandlerAdapter<Req, Resp>::Context Context;
+  typedef typename InboundHandler<Req>::Context Context;
 
   void setPipeline(Pipeline* pipeline) {
     pipeline_ = pipeline;
-    pipeline->addBack(
-      ChannelHandlerPtr<SerialClientDispatcher<Pipeline, Req, Resp>, false>(
-        this));
+    pipeline->addBack(this);
     pipeline->finalize();
   }
 

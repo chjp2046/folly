@@ -22,7 +22,7 @@
 #include <folly/Memory.h>
 #include <folly/Optional.h>
 #include <folly/String.h>
-#include <folly/experimental/Singleton.h>
+#include <folly/Singleton.h>
 #include <folly/json.h>
 
 namespace folly {
@@ -351,7 +351,6 @@ struct RequiredValidator final : IValidator {
                                  const dynamic& value) const override {
     if (value.isObject()) {
       for (const auto& prop : properties_) {
-        auto* p = value.get_ptr(prop);
         if (!value.get_ptr(prop)) {
           return makeError("to have property", prop, value);
         }

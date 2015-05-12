@@ -19,7 +19,7 @@
 #include <chrono>
 #include <thread>
 
-#include <folly/Baton.h>
+#include <folly/experimental/fibers/Baton.h>
 #include <folly/Optional.h>
 #include <folly/futures/detail/Core.h>
 #include <folly/futures/Timekeeper.h>
@@ -44,30 +44,21 @@ Future<T>& Future<T>::operator=(Future<T>&& other) noexcept {
 }
 
 template <class T>
-template <class F>
-Future<T>::Future(
-  const typename std::enable_if<!std::is_void<F>::value, F>::type& val)
-    : core_(nullptr) {
-  Promise<F> p;
-  p.setValue(val);
+template <class T2,
+          typename std::enable_if<!isFuture<T2>::value, void*>::type>
+Future<T>::Future(T2&& val) : core_(nullptr) {
+  Promise<T> p;
+  p.setValue(std::forward<T2>(val));
   *this = p.getFuture();
 }
 
 template <class T>
-template <class F>
-Future<T>::Future(
-  typename std::enable_if<!std::is_void<F>::value, F>::type&& val)
-    : core_(nullptr) {
-  Promise<F> p;
-  p.setValue(std::forward<F>(val));
-  *this = p.getFuture();
-}
-
-template <>
-template <class F,
-          typename std::enable_if<std::is_void<F>::value, int>::type>
-Future<void>::Future() : core_(nullptr) {
-  Promise<void> p;
+template <class T2,
+          typename std::enable_if<
+            folly::is_void_or_unit<T2>::value,
+            int>::type>
+Future<T>::Future() : core_(nullptr) {
+  Promise<T> p;
   p.setValue();
   *this = p.getFuture();
 }
@@ -171,7 +162,7 @@ Future<T>::thenImplementation(F func, detail::argResult<isTry, F, Args...>) {
       if (!isTry && t.hasException()) {
         p->setException(std::move(t.exception()));
       } else {
-        p->fulfil([&]() {
+        p->setWith([&]() {
           return (*funcm)(t.template get<isTry, Args>()...);
         });
       }
@@ -210,7 +201,7 @@ Future<T>::thenImplementation(F func, detail::argResult<isTry, F, Args...>) {
           auto f2 = (*funcm)(t.template get<isTry, Args>()...);
           // that didn't throw, now we can steal p
           f2.setCallback_([p](Try<B>&& b) mutable {
-            p->fulfilTry(std::move(b));
+            p->setTry(std::move(b));
           });
         } catch (const std::exception& e) {
           p->setException(exception_wrapper(std::current_exception(), e));
@@ -236,6 +227,18 @@ Future<T>::then(R(Caller::*func)(Args...), Caller *instance) {
 }
 
 template <class T>
+template <class Executor, class Arg, class... Args>
+auto Future<T>::then(Executor* x, Arg&& arg, Args&&... args)
+  -> decltype(this->then(std::forward<Arg>(arg),
+                         std::forward<Args>(args)...))
+{
+  auto oldX = getExecutor();
+  setExecutor(x);
+  return this->then(std::forward<Arg>(arg), std::forward<Args>(args)...).
+               via(oldX);
+}
+
+template <class T>
 Future<void> Future<T>::then() {
   return then([] (Try<T>&& t) {});
 }
@@ -244,6 +247,7 @@ Future<void> Future<T>::then() {
 template <class T>
 template <class F>
 typename std::enable_if<
+  !detail::callableWith<F, exception_wrapper>::value &&
   !detail::Extract<F>::ReturnsFuture::value,
   Future<T>>::type
 Future<T>::onError(F&& func) {
@@ -258,11 +262,11 @@ Future<T>::onError(F&& func) {
   auto funcm = folly::makeMoveWrapper(std::move(func));
   setCallback_([pm, funcm](Try<T>&& t) mutable {
     if (!t.template withException<Exn>([&] (Exn& e) {
-          pm->fulfil([&]{
+          pm->setWith([&]{
             return (*funcm)(e);
           });
         })) {
-      pm->fulfilTry(std::move(t));
+      pm->setTry(std::move(t));
     }
   });
 
@@ -273,6 +277,7 @@ Future<T>::onError(F&& func) {
 template <class T>
 template <class F>
 typename std::enable_if<
+  !detail::callableWith<F, exception_wrapper>::value &&
   detail::Extract<F>::ReturnsFuture::value,
   Future<T>>::type
 Future<T>::onError(F&& func) {
@@ -290,7 +295,7 @@ Future<T>::onError(F&& func) {
           try {
             auto f2 = (*funcm)(e);
             f2.setCallback_([pm](Try<T>&& t2) mutable {
-              pm->fulfilTry(std::move(t2));
+              pm->setTry(std::move(t2));
             });
           } catch (const std::exception& e2) {
             pm->setException(exception_wrapper(std::current_exception(), e2));
@@ -298,7 +303,7 @@ Future<T>::onError(F&& func) {
             pm->setException(exception_wrapper(std::current_exception()));
           }
         })) {
-      pm->fulfilTry(std::move(t));
+      pm->setTry(std::move(t));
     }
   });
 
@@ -321,6 +326,70 @@ Future<T> Future<T>::onTimeout(Duration dur, F&& func, Timekeeper* tk) {
   auto funcw = folly::makeMoveWrapper(std::forward<F>(func));
   return within(dur, tk)
     .onError([funcw](TimedOut const&) { return (*funcw)(); });
+}
+
+template <class T>
+template <class F>
+typename std::enable_if<
+  detail::callableWith<F, exception_wrapper>::value &&
+  detail::Extract<F>::ReturnsFuture::value,
+  Future<T>>::type
+Future<T>::onError(F&& func) {
+  static_assert(
+      std::is_same<typename detail::Extract<F>::Return, Future<T>>::value,
+      "Return type of onError callback must be T or Future<T>");
+
+  Promise<T> p;
+  auto f = p.getFuture();
+  auto pm = folly::makeMoveWrapper(std::move(p));
+  auto funcm = folly::makeMoveWrapper(std::move(func));
+  setCallback_([pm, funcm](Try<T> t) mutable {
+    if (t.hasException()) {
+      try {
+        auto f2 = (*funcm)(std::move(t.exception()));
+        f2.setCallback_([pm](Try<T> t2) mutable {
+          pm->setTry(std::move(t2));
+        });
+      } catch (const std::exception& e2) {
+        pm->setException(exception_wrapper(std::current_exception(), e2));
+      } catch (...) {
+        pm->setException(exception_wrapper(std::current_exception()));
+      }
+    } else {
+      pm->setTry(std::move(t));
+    }
+  });
+
+  return f;
+}
+
+// onError(exception_wrapper) that returns T
+template <class T>
+template <class F>
+typename std::enable_if<
+  detail::callableWith<F, exception_wrapper>::value &&
+  !detail::Extract<F>::ReturnsFuture::value,
+  Future<T>>::type
+Future<T>::onError(F&& func) {
+  static_assert(
+      std::is_same<typename detail::Extract<F>::Return, Future<T>>::value,
+      "Return type of onError callback must be T or Future<T>");
+
+  Promise<T> p;
+  auto f = p.getFuture();
+  auto pm = folly::makeMoveWrapper(std::move(p));
+  auto funcm = folly::makeMoveWrapper(std::move(func));
+  setCallback_([pm, funcm](Try<T> t) mutable {
+    if (t.hasException()) {
+      pm->setWith([&]{
+        return (*funcm)(std::move(t.exception()));
+      });
+    } else {
+      pm->setTry(std::move(t));
+    }
+  });
+
+  return f;
 }
 
 template <class T>
@@ -354,7 +423,6 @@ Optional<Try<T>> Future<T>::poll() {
 }
 
 template <class T>
-template <typename Executor>
 inline Future<T> Future<T>::via(Executor* executor) && {
   throwIfInvalid();
 
@@ -364,13 +432,12 @@ inline Future<T> Future<T>::via(Executor* executor) && {
 }
 
 template <class T>
-template <typename Executor>
 inline Future<T> Future<T>::via(Executor* executor) & {
   throwIfInvalid();
 
   MoveWrapper<Promise<T>> p;
   auto f = p->getFuture();
-  then([p](Try<T>&& t) mutable { p->fulfilTry(std::move(t)); });
+  then([p](Try<T>&& t) mutable { p->setTry(std::move(t)); });
   return std::move(f).via(executor);
 }
 
@@ -402,12 +469,12 @@ Future<void> makeFuture() {
 }
 
 template <class F>
-auto makeFutureTry(
+auto makeFutureWith(
     F&& func,
     typename std::enable_if<!std::is_reference<F>::value, bool>::type sdf)
     -> Future<decltype(func())> {
   Promise<decltype(func())> p;
-  p.fulfil(
+  p.setWith(
     [&func]() {
       return (func)();
     });
@@ -415,9 +482,9 @@ auto makeFutureTry(
 }
 
 template <class F>
-auto makeFutureTry(F const& func) -> Future<decltype(func())> {
+auto makeFutureWith(F const& func) -> Future<decltype(func())> {
   F copy = func;
-  return makeFutureTry(std::move(copy));
+  return makeFutureWith(std::move(copy));
 }
 
 template <class T>
@@ -446,7 +513,7 @@ makeFuture(E const& e) {
 template <class T>
 Future<T> makeFuture(Try<T>&& t) {
   Promise<typename std::decay<T>::type> p;
-  p.fulfilTry(std::move(t));
+  p.setTry(std::move(t));
   return p.getFuture();
 }
 
@@ -460,62 +527,125 @@ inline Future<void> makeFuture(Try<void>&& t) {
 }
 
 // via
-template <typename Executor>
-Future<void> via(Executor* executor) {
+inline Future<void> via(Executor* executor) {
   return makeFuture().via(executor);
 }
 
-// when (variadic)
+// mapSetCallback calls func(i, Try<T>) when every future completes
+
+template <class T, class InputIterator, class F>
+void mapSetCallback(InputIterator first, InputIterator last, F func) {
+  for (size_t i = 0; first != last; ++first, ++i) {
+    first->setCallback_([func, i](Try<T>&& t) {
+      func(i, std::move(t));
+    });
+  }
+}
+
+// collectAll (variadic)
 
 template <typename... Fs>
 typename detail::VariadicContext<
   typename std::decay<Fs>::type::value_type...>::type
-whenAll(Fs&&... fs)
-{
-  auto ctx =
-    new detail::VariadicContext<typename std::decay<Fs>::type::value_type...>();
-  ctx->total = sizeof...(fs);
-  auto f_saved = ctx->p.getFuture();
-  detail::whenAllVariadicHelper(ctx,
+collectAll(Fs&&... fs) {
+  auto ctx = std::make_shared<detail::VariadicContext<
+    typename std::decay<Fs>::type::value_type...>>();
+  detail::collectAllVariadicHelper(ctx,
     std::forward<typename std::decay<Fs>::type>(fs)...);
-  return f_saved;
+  return ctx->p.getFuture();
 }
 
-// when (iterator)
+// collectAll (iterator)
 
 template <class InputIterator>
 Future<
   std::vector<
   Try<typename std::iterator_traits<InputIterator>::value_type::value_type>>>
-whenAll(InputIterator first, InputIterator last)
-{
+collectAll(InputIterator first, InputIterator last) {
   typedef
     typename std::iterator_traits<InputIterator>::value_type::value_type T;
 
-  if (first >= last) {
-    return makeFuture(std::vector<Try<T>>());
+  struct CollectAllContext {
+    CollectAllContext(int n) : results(n) {}
+    ~CollectAllContext() {
+      p.setValue(std::move(results));
+    }
+    Promise<std::vector<Try<T>>> p;
+    std::vector<Try<T>> results;
+  };
+
+  auto ctx = std::make_shared<CollectAllContext>(std::distance(first, last));
+  mapSetCallback<T>(first, last, [ctx](size_t i, Try<T>&& t) {
+    ctx->results[i] = std::move(t);
+  });
+  return ctx->p.getFuture();
+}
+
+namespace detail {
+
+template <typename T>
+struct CollectContext {
+  struct Nothing { explicit Nothing(int n) {} };
+
+  using Result = typename std::conditional<
+    std::is_void<T>::value,
+    void,
+    std::vector<T>>::type;
+
+  using InternalResult = typename std::conditional<
+    std::is_void<T>::value,
+    Nothing,
+    std::vector<Optional<T>>>::type;
+
+  explicit CollectContext(int n) : result(n) {}
+  ~CollectContext() {
+    if (!threw.exchange(true)) {
+      // map Optional<T> -> T
+      std::vector<T> finalResult;
+      finalResult.reserve(result.size());
+      std::transform(result.begin(), result.end(),
+                     std::back_inserter(finalResult),
+                     [](Optional<T>& o) { return std::move(o.value()); });
+      p.setValue(std::move(finalResult));
+    }
   }
-  size_t n = std::distance(first, last);
-
-  auto ctx = new detail::WhenAllContext<T>();
-
-  ctx->results.resize(n);
-
-  auto f_saved = ctx->p.getFuture();
-
-  for (size_t i = 0; first != last; ++first, ++i) {
-     assert(i < n);
-     auto& f = *first;
-     f.setCallback_([ctx, i, n](Try<T>&& t) {
-         ctx->results[i] = std::move(t);
-         if (++ctx->count == n) {
-           ctx->p.setValue(std::move(ctx->results));
-           delete ctx;
-         }
-       });
+  inline void setPartialResult(size_t i, Try<T>& t) {
+    result[i] = std::move(t.value());
   }
+  Promise<Result> p;
+  InternalResult result;
+  std::atomic<bool> threw;
+};
 
-  return f_saved;
+// Specialize for void (implementations in Future.cpp)
+
+template <>
+CollectContext<void>::~CollectContext();
+
+template <>
+void CollectContext<void>::setPartialResult(size_t i, Try<void>& t);
+
+}
+
+template <class InputIterator>
+Future<typename detail::CollectContext<
+  typename std::iterator_traits<InputIterator>::value_type::value_type>::Result>
+collect(InputIterator first, InputIterator last) {
+  typedef
+    typename std::iterator_traits<InputIterator>::value_type::value_type T;
+
+  auto ctx = std::make_shared<detail::CollectContext<T>>(
+    std::distance(first, last));
+  mapSetCallback<T>(first, last, [ctx](size_t i, Try<T>&& t) {
+    if (t.hasException()) {
+       if (!ctx->threw.exchange(true)) {
+         ctx->p.setException(std::move(t.exception()));
+       }
+     } else if (!ctx->threw) {
+       ctx->setPartialResult(i, t);
+     }
+  });
+  return ctx->p.getFuture();
 }
 
 template <class InputIterator>
@@ -523,110 +653,84 @@ Future<
   std::pair<size_t,
             Try<
               typename
-              std::iterator_traits<InputIterator>::value_type::value_type> > >
-whenAny(InputIterator first, InputIterator last) {
+              std::iterator_traits<InputIterator>::value_type::value_type>>>
+collectAny(InputIterator first, InputIterator last) {
   typedef
     typename std::iterator_traits<InputIterator>::value_type::value_type T;
 
-  auto ctx = new detail::WhenAnyContext<T>(std::distance(first, last));
-  auto f_saved = ctx->p.getFuture();
+  struct CollectAnyContext {
+    CollectAnyContext(size_t n) : done(false) {};
+    Promise<std::pair<size_t, Try<T>>> p;
+    std::atomic<bool> done;
+  };
 
-  for (size_t i = 0; first != last; first++, i++) {
-    auto& f = *first;
-    f.setCallback_([i, ctx](Try<T>&& t) {
-      if (!ctx->done.exchange(true)) {
-        ctx->p.setValue(std::make_pair(i, std::move(t)));
-      }
-      ctx->decref();
-    });
-  }
-
-  return f_saved;
+  auto ctx = std::make_shared<CollectAnyContext>(std::distance(first, last));
+  mapSetCallback<T>(first, last, [ctx](size_t i, Try<T>&& t) {
+    if (!ctx->done.exchange(true)) {
+      ctx->p.setValue(std::make_pair(i, std::move(t)));
+    }
+  });
+  return ctx->p.getFuture();
 }
 
 template <class InputIterator>
 Future<std::vector<std::pair<size_t, Try<typename
   std::iterator_traits<InputIterator>::value_type::value_type>>>>
-whenN(InputIterator first, InputIterator last, size_t n) {
+collectN(InputIterator first, InputIterator last, size_t n) {
   typedef typename
     std::iterator_traits<InputIterator>::value_type::value_type T;
   typedef std::vector<std::pair<size_t, Try<T>>> V;
 
-  struct ctx_t {
+  struct CollectNContext {
     V v;
-    size_t completed;
+    std::atomic<size_t> completed = {0};
     Promise<V> p;
   };
-  auto ctx = std::make_shared<ctx_t>();
-  ctx->completed = 0;
+  auto ctx = std::make_shared<CollectNContext>();
 
-  // for each completed Future, increase count and add to vector, until we
-  // have n completed futures at which point we fulfil our Promise with the
-  // vector
-  auto it = first;
-  size_t i = 0;
-  while (it != last) {
-    it->then([ctx, n, i](Try<T>&& t) {
-      auto& v = ctx->v;
+  if (std::distance(first, last) < n) {
+    ctx->p.setException(std::runtime_error("Not enough futures"));
+  } else {
+    // for each completed Future, increase count and add to vector, until we
+    // have n completed futures at which point we fulfil our Promise with the
+    // vector
+    mapSetCallback<T>(first, last, [ctx, n](size_t i, Try<T>&& t) {
       auto c = ++ctx->completed;
       if (c <= n) {
         assert(ctx->v.size() < n);
-        v.push_back(std::make_pair(i, std::move(t)));
+        ctx->v.push_back(std::make_pair(i, std::move(t)));
         if (c == n) {
-          ctx->p.fulfilTry(Try<V>(std::move(v)));
+          ctx->p.setTry(Try<V>(std::move(ctx->v)));
         }
       }
     });
-
-    it++;
-    i++;
-  }
-
-  if (i < n) {
-    ctx->p.setException(std::runtime_error("Not enough futures"));
   }
 
   return ctx->p.getFuture();
 }
 
-template <class It, class T, class F, class ItT, class Arg>
-typename std::enable_if<!isFutureResult<F, T, Arg>::value, Future<T>>::type
-reduce(It first, It last, T initial, F func) {
+template <class It, class T, class F>
+Future<T> reduce(It first, It last, T&& initial, F&& func) {
   if (first == last) {
     return makeFuture(std::move(initial));
   }
 
+  typedef typename std::iterator_traits<It>::value_type::value_type ItT;
+  typedef typename std::conditional<
+    detail::callableWith<F, T&&, Try<ItT>&&>::value, Try<ItT>, ItT>::type Arg;
   typedef isTry<Arg> IsTry;
 
-  return whenAll(first, last)
-    .then([initial, func](std::vector<Try<ItT>>& vals) mutable {
-      for (auto& val : vals) {
-        initial = func(std::move(initial),
-                       // Either return a ItT&& or a Try<ItT>&& depending
-                       // on the type of the argument of func.
-                       val.template get<IsTry::value, Arg&&>());
-      }
-      return initial;
-    });
-}
+  folly::MoveWrapper<T> minitial(std::move(initial));
+  auto sfunc = std::make_shared<F>(std::move(func));
 
-template <class It, class T, class F, class ItT, class Arg>
-typename std::enable_if<isFutureResult<F, T, Arg>::value, Future<T>>::type
-reduce(It first, It last, T initial, F func) {
-  if (first == last) {
-    return makeFuture(std::move(initial));
-  }
-
-  typedef isTry<Arg> IsTry;
-
-  auto f = first->then([initial, func](Try<ItT>& head) mutable {
-    return func(std::move(initial),
+  auto f = first->then([minitial, sfunc](Try<ItT>& head) mutable {
+    return (*sfunc)(std::move(*minitial),
                 head.template get<IsTry::value, Arg&&>());
   });
 
   for (++first; first != last; ++first) {
-    f = whenAll(f, *first).then([func](std::tuple<Try<T>, Try<ItT>>& t) {
-      return func(std::move(std::get<0>(t).value()),
+    f = collectAll(f, *first).then([sfunc](std::tuple<Try<T>, Try<ItT>>& t) {
+      return (*sfunc)(std::move(std::get<0>(t).value()),
                   // Either return a ItT&& or a Try<ItT>&& depending
                   // on the type of the argument of func.
                   std::get<1>(t).template get<IsTry::value, Arg&&>());
@@ -634,6 +738,20 @@ reduce(It first, It last, T initial, F func) {
   }
 
   return f;
+}
+
+template <class T>
+template <class I, class F>
+Future<I> Future<T>::reduce(I&& initial, F&& func) {
+  folly::MoveWrapper<I> minitial(std::move(initial));
+  folly::MoveWrapper<F> mfunc(std::move(func));
+  return then([minitial, mfunc](T& vals) mutable {
+    auto ret = std::move(*minitial);
+    for (auto& val : vals) {
+      ret = (*mfunc)(std::move(ret), std::move(val));
+    }
+    return ret;
+  });
 }
 
 template <class T>
@@ -670,7 +788,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
 
   this->then([ctx](Try<T>&& t) {
     if (ctx->token.exchange(true) == false) {
-      ctx->promise.fulfilTry(std::move(t));
+      ctx->promise.setTry(std::move(t));
     }
   });
 
@@ -679,7 +797,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
 
 template <class T>
 Future<T> Future<T>::delayed(Duration dur, Timekeeper* tk) {
-  return whenAll(*this, futures::sleep(dur, tk))
+  return collectAll(*this, futures::sleep(dur, tk))
     .then([](std::tuple<Try<T>, Try<void>> tup) {
       Try<T>& t = std::get<0>(tup);
       return makeFuture<T>(std::move(t));
@@ -693,7 +811,7 @@ void waitImpl(Future<T>& f) {
   // short-circuit if there's nothing to do
   if (f.isReady()) return;
 
-  Baton<> baton;
+  folly::fibers::Baton baton;
   f = f.then([&](Try<T> t) {
     baton.post();
     return makeFuture(std::move(t));
@@ -713,7 +831,7 @@ void waitImpl(Future<T>& f, Duration dur) {
   // short-circuit if there's nothing to do
   if (f.isReady()) return;
 
-  auto baton = std::make_shared<Baton<>>();
+  auto baton = std::make_shared<folly::fibers::Baton>();
   f = f.then([baton](Try<T> t) {
     baton->post();
     return makeFuture(std::move(t));
@@ -722,7 +840,7 @@ void waitImpl(Future<T>& f, Duration dur) {
   // Let's preserve the invariant that if we did not timeout (timed_wait returns
   // true), then the returned Future is complete when it is returned to the
   // caller. We need to wait out the race for that Future to complete.
-  if (baton->timed_wait(std::chrono::system_clock::now() + dur)) {
+  if (baton->timed_wait(dur)) {
     while (!f.isReady()) {
       std::this_thread::yield();
     }
@@ -814,11 +932,27 @@ inline void Future<void>::getVia(DrivableExecutor* e) {
   waitVia(e).value();
 }
 
+namespace detail {
+  template <class T>
+  struct TryEquals {
+    static bool equals(const Try<T>& t1, const Try<T>& t2) {
+      return t1.value() == t2.value();
+    }
+  };
+
+  template <>
+  struct TryEquals<void> {
+    static bool equals(const Try<void>& t1, const Try<void>& t2) {
+      return true;
+    }
+  };
+}
+
 template <class T>
 Future<bool> Future<T>::willEqual(Future<T>& f) {
-  return whenAll(*this, f).then([](const std::tuple<Try<T>, Try<T>>& t) {
+  return collectAll(*this, f).then([](const std::tuple<Try<T>, Try<T>>& t) {
     if (std::get<0>(t).hasValue() && std::get<1>(t).hasValue()) {
-      return std::get<0>(t).value() == std::get<1>(t).value();
+      return detail::TryEquals<T>::equals(std::get<0>(t), std::get<1>(t));
     } else {
       return false;
       }
@@ -857,12 +991,28 @@ namespace futures {
     MoveWrapper<Promise<A>> pw;
     MoveWrapper<Future<Z>> fw(chainHelper<Z>(pw->getFuture(), fns...));
     return [=](Try<A> t) mutable {
-      pw->fulfilTry(std::move(t));
+      pw->setTry(std::move(t));
       return std::move(*fw);
     };
   }
 
+  template <class It, class F, class ItT, class Result>
+  std::vector<Future<Result>> map(It first, It last, F func) {
+    std::vector<Future<Result>> results;
+    for (auto it = first; it != last; it++) {
+      results.push_back(it->then(func));
+    }
+    return results;
+  }
 }
+
+// Instantiate the most common Future types to save compile time
+extern template class Future<void>;
+extern template class Future<bool>;
+extern template class Future<int>;
+extern template class Future<int64_t>;
+extern template class Future<std::string>;
+extern template class Future<double>;
 
 } // namespace folly
 

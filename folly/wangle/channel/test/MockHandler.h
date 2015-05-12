@@ -16,18 +16,18 @@
 
 #pragma once
 
-#include <folly/wangle/channel/ChannelHandler.h>
+#include <folly/wangle/channel/Handler.h>
 #include <gmock/gmock.h>
 
 namespace folly { namespace wangle {
 
 template <class Rin, class Rout = Rin, class Win = Rout, class Wout = Rin>
-class MockChannelHandler : public ChannelHandler<Rin, Rout, Win, Wout> {
+class MockHandler : public Handler<Rin, Rout, Win, Wout> {
  public:
-  typedef typename ChannelHandler<Rin, Rout, Win, Wout>::Context Context;
+  typedef typename Handler<Rin, Rout, Win, Wout>::Context Context;
 
-  MockChannelHandler() = default;
-  MockChannelHandler(MockChannelHandler&&) = default;
+  MockHandler() = default;
+  MockHandler(MockHandler&&) = default;
 
 #ifdef __clang__
 # pragma clang diagnostic push
@@ -57,19 +57,19 @@ class MockChannelHandler : public ChannelHandler<Rin, Rout, Win, Wout> {
   }
 
   Future<void> write(Context* ctx, Win msg) override {
-    return makeFutureTry([&](){
+    return makeFutureWith([&](){
       write_(ctx, msg);
     });
   }
 
   Future<void> close(Context* ctx) override {
-    return makeFutureTry([&](){
+    return makeFutureWith([&](){
       close_(ctx);
     });
   }
 };
 
 template <class R, class W = R>
-using MockChannelHandlerAdapter = MockChannelHandler<R, R, W, W>;
+using MockHandlerAdapter = MockHandler<R, R, W, W>;
 
 }}

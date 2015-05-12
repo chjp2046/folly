@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-#include <folly/wangle/channel/ChannelHandler.h>
-#include <folly/wangle/channel/ChannelPipeline.h>
+#include <folly/wangle/channel/Handler.h>
+#include <folly/wangle/channel/Pipeline.h>
+#include <folly/wangle/channel/StaticPipeline.h>
 #include <folly/wangle/channel/AsyncSocketHandler.h>
 #include <folly/wangle/channel/OutputBufferingHandler.h>
-#include <folly/wangle/channel/test/MockChannelHandler.h>
+#include <folly/wangle/channel/test/MockHandler.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -26,8 +27,7 @@ using namespace folly;
 using namespace folly::wangle;
 using namespace testing;
 
-typedef StrictMock<MockChannelHandlerAdapter<int, int>> IntHandler;
-typedef ChannelHandlerPtr<IntHandler, false> IntHandlerPtr;
+typedef StrictMock<MockHandlerAdapter<int, int>> IntHandler;
 
 ACTION(FireRead) {
   arg0->fireRead(arg1);
@@ -50,12 +50,12 @@ ACTION(FireClose) {
 }
 
 // Test move only types, among other things
-TEST(ChannelTest, RealHandlersCompile) {
+TEST(PipelineTest, RealHandlersCompile) {
   EventBase eb;
   auto socket = AsyncSocket::newSocket(&eb);
   // static
   {
-    ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>,
+    StaticPipeline<IOBufQueue&, std::unique_ptr<IOBuf>,
       AsyncSocketHandler,
       OutputBufferingHandler>
     pipeline{AsyncSocketHandler(socket), OutputBufferingHandler()};
@@ -64,7 +64,7 @@ TEST(ChannelTest, RealHandlersCompile) {
   }
   // dynamic
   {
-    ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+    Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
     pipeline
       .addBack(AsyncSocketHandler(socket))
       .addBack(OutputBufferingHandler())
@@ -75,14 +75,17 @@ TEST(ChannelTest, RealHandlersCompile) {
 }
 
 // Test that handlers correctly fire the next handler when directed
-TEST(ChannelTest, FireActions) {
+TEST(PipelineTest, FireActions) {
   IntHandler handler1;
   IntHandler handler2;
 
-  EXPECT_CALL(handler1, attachPipeline(_));
-  EXPECT_CALL(handler2, attachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler2, attachPipeline(_));
+    EXPECT_CALL(handler1, attachPipeline(_));
+  }
 
-  ChannelPipeline<int, int, IntHandlerPtr, IntHandlerPtr>
+  StaticPipeline<int, int, IntHandler, IntHandler>
   pipeline(&handler1, &handler2);
 
   EXPECT_CALL(handler1, read_(_, _)).WillOnce(FireRead());
@@ -105,16 +108,19 @@ TEST(ChannelTest, FireActions) {
   EXPECT_CALL(handler1, close_(_)).Times(1);
   EXPECT_NO_THROW(pipeline.close().value());
 
-  EXPECT_CALL(handler1, detachPipeline(_));
-  EXPECT_CALL(handler2, detachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler1, detachPipeline(_));
+    EXPECT_CALL(handler2, detachPipeline(_));
+  }
 }
 
 // Test that nothing bad happens when actions reach the end of the pipeline
 // (a warning will be logged, however)
-TEST(ChannelTest, ReachEndOfPipeline) {
+TEST(PipelineTest, ReachEndOfPipeline) {
   IntHandler handler;
   EXPECT_CALL(handler, attachPipeline(_));
-  ChannelPipeline<int, int, IntHandlerPtr>
+  StaticPipeline<int, int, IntHandler>
   pipeline(&handler);
 
   EXPECT_CALL(handler, read_(_, _)).WillOnce(FireRead());
@@ -136,14 +142,17 @@ TEST(ChannelTest, ReachEndOfPipeline) {
 }
 
 // Test having the last read handler turn around and write
-TEST(ChannelTest, TurnAround) {
+TEST(PipelineTest, TurnAround) {
   IntHandler handler1;
   IntHandler handler2;
 
-  EXPECT_CALL(handler1, attachPipeline(_));
-  EXPECT_CALL(handler2, attachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler2, attachPipeline(_));
+    EXPECT_CALL(handler1, attachPipeline(_));
+  }
 
-  ChannelPipeline<int, int, IntHandlerPtr, IntHandlerPtr>
+  StaticPipeline<int, int, IntHandler, IntHandler>
   pipeline(&handler1, &handler2);
 
   EXPECT_CALL(handler1, read_(_, _)).WillOnce(FireRead());
@@ -151,27 +160,33 @@ TEST(ChannelTest, TurnAround) {
   EXPECT_CALL(handler1, write_(_, _)).Times(1);
   pipeline.read(1);
 
-  EXPECT_CALL(handler1, detachPipeline(_));
-  EXPECT_CALL(handler2, detachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler1, detachPipeline(_));
+    EXPECT_CALL(handler2, detachPipeline(_));
+  }
 }
 
-TEST(ChannelTest, DynamicFireActions) {
+TEST(PipelineTest, DynamicFireActions) {
   IntHandler handler1, handler2, handler3;
   EXPECT_CALL(handler2, attachPipeline(_));
-  ChannelPipeline<int, int, IntHandlerPtr>
+  StaticPipeline<int, int, IntHandler>
   pipeline(&handler2);
 
-  EXPECT_CALL(handler1, attachPipeline(_));
-  EXPECT_CALL(handler3, attachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler3, attachPipeline(_));
+    EXPECT_CALL(handler1, attachPipeline(_));
+  }
 
   pipeline
-    .addFront(IntHandlerPtr(&handler1))
-    .addBack(IntHandlerPtr(&handler3))
+    .addFront(&handler1)
+    .addBack(&handler3)
     .finalize();
 
-  EXPECT_TRUE(pipeline.getHandler<IntHandlerPtr>(0));
-  EXPECT_TRUE(pipeline.getHandler<IntHandlerPtr>(1));
-  EXPECT_TRUE(pipeline.getHandler<IntHandlerPtr>(2));
+  EXPECT_TRUE(pipeline.getHandler<IntHandler>(0));
+  EXPECT_TRUE(pipeline.getHandler<IntHandler>(1));
+  EXPECT_TRUE(pipeline.getHandler<IntHandler>(2));
 
   EXPECT_CALL(handler1, read_(_, _)).WillOnce(FireRead());
   EXPECT_CALL(handler2, read_(_, _)).WillOnce(FireRead());
@@ -183,41 +198,94 @@ TEST(ChannelTest, DynamicFireActions) {
   EXPECT_CALL(handler1, write_(_, _)).Times(1);
   EXPECT_NO_THROW(pipeline.write(1).value());
 
-  EXPECT_CALL(handler1, detachPipeline(_));
-  EXPECT_CALL(handler2, detachPipeline(_));
-  EXPECT_CALL(handler3, detachPipeline(_));
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler1, detachPipeline(_));
+    EXPECT_CALL(handler2, detachPipeline(_));
+    EXPECT_CALL(handler3, detachPipeline(_));
+  }
+}
+
+TEST(PipelineTest, DynamicAttachDetachOrder) {
+  IntHandler handler1, handler2;
+  Pipeline<int, int> pipeline;
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler2, attachPipeline(_));
+    EXPECT_CALL(handler1, attachPipeline(_));
+  }
+  pipeline
+    .addBack(&handler1)
+    .addBack(&handler2)
+    .finalize();
+  {
+    InSequence sequence;
+    EXPECT_CALL(handler1, detachPipeline(_));
+    EXPECT_CALL(handler2, detachPipeline(_));
+  }
+}
+
+TEST(PipelineTest, GetContext) {
+  IntHandler handler;
+  EXPECT_CALL(handler, attachPipeline(_));
+  StaticPipeline<int, int, IntHandler> pipeline(&handler);
+  EXPECT_TRUE(handler.getContext());
+  EXPECT_CALL(handler, detachPipeline(_));
+}
+
+TEST(PipelineTest, HandlerInMultiplePipelines) {
+  IntHandler handler;
+  EXPECT_CALL(handler, attachPipeline(_)).Times(2);
+  StaticPipeline<int, int, IntHandler> pipeline1(&handler);
+  StaticPipeline<int, int, IntHandler> pipeline2(&handler);
+  EXPECT_FALSE(handler.getContext());
+  EXPECT_CALL(handler, detachPipeline(_)).Times(2);
+}
+
+TEST(PipelineTest, HandlerInPipelineTwice) {
+  IntHandler handler;
+  EXPECT_CALL(handler, attachPipeline(_)).Times(2);
+  StaticPipeline<int, int, IntHandler, IntHandler> pipeline(&handler, &handler);
+  EXPECT_FALSE(handler.getContext());
+  EXPECT_CALL(handler, detachPipeline(_)).Times(2);
+}
+
+TEST(PipelineTest, NoDetachOnOwner) {
+  IntHandler handler;
+  EXPECT_CALL(handler, attachPipeline(_));
+  StaticPipeline<int, int, IntHandler> pipeline(&handler);
+  pipeline.setOwner(&handler);
 }
 
 template <class Rin, class Rout = Rin, class Win = Rout, class Wout = Rin>
-class ConcreteChannelHandler : public ChannelHandler<Rin, Rout, Win, Wout> {
-  typedef typename ChannelHandler<Rin, Rout, Win, Wout>::Context Context;
+class ConcreteHandler : public Handler<Rin, Rout, Win, Wout> {
+  typedef typename Handler<Rin, Rout, Win, Wout>::Context Context;
  public:
   void read(Context* ctx, Rin msg) {}
   Future<void> write(Context* ctx, Win msg) { return makeFuture(); }
 };
 
-typedef ChannelHandlerAdapter<std::string, std::string> StringHandler;
-typedef ConcreteChannelHandler<int, std::string> IntToStringHandler;
-typedef ConcreteChannelHandler<std::string, int> StringToIntHandler;
+typedef HandlerAdapter<std::string, std::string> StringHandler;
+typedef ConcreteHandler<int, std::string> IntToStringHandler;
+typedef ConcreteHandler<std::string, int> StringToIntHandler;
 
-TEST(ChannelPipeline, DynamicConstruction) {
-  {
-    ChannelPipeline<int, int> pipeline;
-    EXPECT_THROW(
-      pipeline
-        .addBack(ChannelHandlerAdapter<std::string, std::string>{})
-        .finalize(), std::invalid_argument);
-  }
-  {
-    ChannelPipeline<int, int> pipeline;
-    EXPECT_THROW(
-      pipeline
-        .addFront(ChannelHandlerAdapter<std::string, std::string>{})
-        .finalize(),
+TEST(Pipeline, MissingInboundOrOutbound) {
+  Pipeline<int, int> pipeline;
+  pipeline
+    .addBack(HandlerAdapter<std::string, std::string>{})
+    .finalize();
+  EXPECT_THROW(pipeline.read(0), std::invalid_argument);
+  EXPECT_THROW(pipeline.readEOF(), std::invalid_argument);
+  EXPECT_THROW(
+      pipeline.readException(exception_wrapper(std::runtime_error("blah"))),
       std::invalid_argument);
-  }
+  EXPECT_THROW(pipeline.write(0), std::invalid_argument);
+  EXPECT_THROW(pipeline.close(), std::invalid_argument);
+}
+
+TEST(Pipeline, DynamicConstruction) {
   {
-    ChannelPipeline<std::string, std::string, StringHandler, StringHandler>
+    StaticPipeline<std::string, std::string, StringHandler, StringHandler>
     pipeline{StringHandler(), StringHandler()};
 
     // Exercise both addFront and addBack. Final pipeline is
@@ -232,10 +300,10 @@ TEST(ChannelPipeline, DynamicConstruction) {
   }
 }
 
-TEST(ChannelPipeline, AttachTransport) {
+TEST(Pipeline, AttachTransport) {
   IntHandler handler;
   EXPECT_CALL(handler, attachPipeline(_));
-  ChannelPipeline<int, int, IntHandlerPtr>
+  StaticPipeline<int, int, IntHandler>
   pipeline(&handler);
 
   EventBase eb;

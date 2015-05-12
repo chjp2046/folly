@@ -15,7 +15,7 @@
  */
 #include "ThreadWheelTimekeeper.h"
 
-#include <folly/experimental/Singleton.h>
+#include <folly/Singleton.h>
 #include <folly/futures/Future.h>
 #include <future>
 
@@ -70,7 +70,7 @@ ThreadWheelTimekeeper::ThreadWheelTimekeeper() :
 }
 
 ThreadWheelTimekeeper::~ThreadWheelTimekeeper() {
-  eventBase_.runInEventBaseThread([this]{
+  eventBase_.runInEventBaseThreadAndWait([this]{
     wheelTimer_->cancelAll();
   });
   eventBase_.terminateLoopSoon();

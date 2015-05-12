@@ -29,6 +29,7 @@
 #include <folly/futures/ManualExecutor.h>
 #include <folly/futures/DrivableExecutor.h>
 #include <folly/dynamic.h>
+#include <folly/Baton.h>
 #include <folly/MPMCQueue.h>
 
 #include <folly/io/async/EventBase.h>
@@ -260,6 +261,66 @@ TEST(Future, onError) {
       .onError([&] (eggs_t& e) { throw e; return makeFuture<int>(-1); });
     EXPECT_THROW(f.value(), eggs_t);
   }
+
+  // exception_wrapper, return Future<T>
+  {
+    auto f = makeFuture()
+      .then([] { throw eggs; })
+      .onError([&] (exception_wrapper e) { flag(); return makeFuture(); });
+    EXPECT_FLAG();
+    EXPECT_NO_THROW(f.value());
+  }
+
+  // exception_wrapper, return Future<T> but throw
+  {
+    auto f = makeFuture()
+      .then([]{ throw eggs; return 0; })
+      .onError([&] (exception_wrapper e) {
+        flag();
+        throw eggs;
+        return makeFuture<int>(-1);
+      });
+    EXPECT_FLAG();
+    EXPECT_THROW(f.value(), eggs_t);
+  }
+
+  // exception_wrapper, return T
+  {
+    auto f = makeFuture()
+      .then([]{ throw eggs; return 0; })
+      .onError([&] (exception_wrapper e) {
+        flag();
+        return -1;
+      });
+    EXPECT_FLAG();
+    EXPECT_EQ(-1, f.value());
+  }
+
+  // exception_wrapper, return T but throw
+  {
+    auto f = makeFuture()
+      .then([]{ throw eggs; return 0; })
+      .onError([&] (exception_wrapper e) {
+        flag();
+        throw eggs;
+        return -1;
+      });
+    EXPECT_FLAG();
+    EXPECT_THROW(f.value(), eggs_t);
+  }
+
+  // const exception_wrapper&
+  {
+    auto f = makeFuture()
+      .then([] { throw eggs; })
+      .onError([&] (const exception_wrapper& e) {
+        flag();
+        return makeFuture();
+      });
+    EXPECT_FLAG();
+    EXPECT_NO_THROW(f.value());
+  }
+
 }
 
 TEST(Future, try) {
@@ -475,12 +536,12 @@ TEST(Future, makeFuture) {
   EXPECT_EQ(42, makeFuture<float>(42).value());
 
   auto fun = [] { return 42; };
-  EXPECT_TYPE(makeFutureTry(fun), Future<int>);
-  EXPECT_EQ(42, makeFutureTry(fun).value());
+  EXPECT_TYPE(makeFutureWith(fun), Future<int>);
+  EXPECT_EQ(42, makeFutureWith(fun).value());
 
   auto failfun = []() -> int { throw eggs; };
-  EXPECT_TYPE(makeFutureTry(failfun), Future<int>);
-  EXPECT_THROW(makeFutureTry(failfun).value(), eggs_t);
+  EXPECT_TYPE(makeFutureWith(failfun), Future<int>);
+  EXPECT_THROW(makeFutureWith(failfun).value(), eggs_t);
 
   EXPECT_TYPE(makeFuture(), Future<void>);
 }
@@ -557,17 +618,17 @@ TEST(Promise, setException) {
   }
 }
 
-TEST(Promise, fulfil) {
+TEST(Promise, setWith) {
   {
     Promise<int> p;
     auto f = p.getFuture();
-    p.fulfil([] { return 42; });
+    p.setWith([] { return 42; });
     EXPECT_EQ(42, f.value());
   }
   {
     Promise<int> p;
     auto f = p.getFuture();
-    p.fulfil([]() -> int { throw eggs; });
+    p.setWith([]() -> int { throw eggs; });
     EXPECT_THROW(f.value(), eggs_t);
   }
 }
@@ -629,7 +690,7 @@ TEST(Future, unwrap) {
   EXPECT_EQ(7, f.value());
 }
 
-TEST(Future, whenAll) {
+TEST(Future, collectAll) {
   // returns a vector variant
   {
     vector<Promise<int>> promises(10);
@@ -638,7 +699,7 @@ TEST(Future, whenAll) {
     for (auto& p : promises)
       futures.push_back(p.getFuture());
 
-    auto allf = whenAll(futures.begin(), futures.end());
+    auto allf = collectAll(futures);
 
     random_shuffle(promises.begin(), promises.end());
     for (auto& p : promises) {
@@ -661,7 +722,7 @@ TEST(Future, whenAll) {
     for (auto& p : promises)
       futures.push_back(p.getFuture());
 
-    auto allf = whenAll(futures.begin(), futures.end());
+    auto allf = collectAll(futures);
 
 
     promises[0].setValue(42);
@@ -693,7 +754,7 @@ TEST(Future, whenAll) {
     for (auto& p : promises)
       futures.push_back(p.getFuture());
 
-    auto allf = whenAll(futures.begin(), futures.end())
+    auto allf = collectAll(futures)
       .then([](Try<vector<Try<void>>>&& ts) {
         for (auto& f : ts.value())
           f.value();
@@ -706,8 +767,165 @@ TEST(Future, whenAll) {
   }
 }
 
+TEST(Future, collect) {
+  // success case
+  {
+    vector<Promise<int>> promises(10);
+    vector<Future<int>> futures;
 
-TEST(Future, whenAny) {
+    for (auto& p : promises)
+      futures.push_back(p.getFuture());
+
+    auto allf = collect(futures);
+
+    random_shuffle(promises.begin(), promises.end());
+    for (auto& p : promises) {
+      EXPECT_FALSE(allf.isReady());
+      p.setValue(42);
+    }
+
+    EXPECT_TRUE(allf.isReady());
+    for (auto i : allf.value()) {
+      EXPECT_EQ(42, i);
+    }
+  }
+
+  // failure case
+  {
+    vector<Promise<int>> promises(10);
+    vector<Future<int>> futures;
+
+    for (auto& p : promises)
+      futures.push_back(p.getFuture());
+
+    auto allf = collect(futures);
+
+    random_shuffle(promises.begin(), promises.end());
+    for (int i = 0; i < 10; i++) {
+      if (i < 5) {
+        // everthing goes well so far...
+        EXPECT_FALSE(allf.isReady());
+        promises[i].setValue(42);
+      } else if (i == 5) {
+        // short circuit with an exception
+        EXPECT_FALSE(allf.isReady());
+        promises[i].setException(eggs);
+        EXPECT_TRUE(allf.isReady());
+      } else if (i < 8) {
+        // don't blow up on further values
+        EXPECT_TRUE(allf.isReady());
+        promises[i].setValue(42);
+      } else {
+        // don't blow up on further exceptions
+        EXPECT_TRUE(allf.isReady());
+        promises[i].setException(eggs);
+      }
+    }
+
+    EXPECT_THROW(allf.value(), eggs_t);
+  }
+
+  // void futures success case
+  {
+    vector<Promise<void>> promises(10);
+    vector<Future<void>> futures;
+
+    for (auto& p : promises)
+      futures.push_back(p.getFuture());
+
+    auto allf = collect(futures);
+
+    random_shuffle(promises.begin(), promises.end());
+    for (auto& p : promises) {
+      EXPECT_FALSE(allf.isReady());
+      p.setValue();
+    }
+
+    EXPECT_TRUE(allf.isReady());
+  }
+
+  // void futures failure case
+  {
+    vector<Promise<void>> promises(10);
+    vector<Future<void>> futures;
+
+    for (auto& p : promises)
+      futures.push_back(p.getFuture());
+
+    auto allf = collect(futures);
+
+    random_shuffle(promises.begin(), promises.end());
+    for (int i = 0; i < 10; i++) {
+      if (i < 5) {
+        // everthing goes well so far...
+        EXPECT_FALSE(allf.isReady());
+        promises[i].setValue();
+      } else if (i == 5) {
+        // short circuit with an exception
+        EXPECT_FALSE(allf.isReady());
+        promises[i].setException(eggs);
+        EXPECT_TRUE(allf.isReady());
+      } else if (i < 8) {
+        // don't blow up on further values
+        EXPECT_TRUE(allf.isReady());
+        promises[i].setValue();
+      } else {
+        // don't blow up on further exceptions
+        EXPECT_TRUE(allf.isReady());
+        promises[i].setException(eggs);
+      }
+    }
+
+    EXPECT_THROW(allf.value(), eggs_t);
+  }
+
+  // move only compiles
+  {
+    vector<Promise<unique_ptr<int>>> promises(10);
+    vector<Future<unique_ptr<int>>> futures;
+
+    for (auto& p : promises)
+      futures.push_back(p.getFuture());
+
+    collect(futures);
+  }
+
+}
+
+struct NotDefaultConstructible {
+  NotDefaultConstructible() = delete;
+  NotDefaultConstructible(int arg) : i(arg) {}
+  int i;
+};
+
+// We have a specialized implementation for non-default-constructible objects
+// Ensure that it works and preserves order
+TEST(Future, collectNotDefaultConstructible) {
+  vector<Promise<NotDefaultConstructible>> promises(10);
+  vector<Future<NotDefaultConstructible>> futures;
+  vector<int> indices(10);
+  std::iota(indices.begin(), indices.end(), 0);
+  random_shuffle(indices.begin(), indices.end());
+
+  for (auto& p : promises)
+    futures.push_back(p.getFuture());
+
+  auto allf = collect(futures);
+
+  for (auto i : indices) {
+    EXPECT_FALSE(allf.isReady());
+    promises[i].setValue(NotDefaultConstructible(i));
+  }
+
+  EXPECT_TRUE(allf.isReady());
+  int i = 0;
+  for (auto val : allf.value()) {
+    EXPECT_EQ(i, val.i);
+    i++;
+  }
+}
+
+TEST(Future, collectAny) {
   {
     vector<Promise<int>> promises(10);
     vector<Future<int>> futures;
@@ -719,7 +937,7 @@ TEST(Future, whenAny) {
       EXPECT_FALSE(f.isReady());
     }
 
-    auto anyf = whenAny(futures.begin(), futures.end());
+    auto anyf = collectAny(futures);
 
     /* futures were moved in, so these are invalid now */
     EXPECT_FALSE(anyf.isReady());
@@ -747,7 +965,7 @@ TEST(Future, whenAny) {
       EXPECT_FALSE(f.isReady());
     }
 
-    auto anyf = whenAny(futures.begin(), futures.end());
+    auto anyf = collectAny(futures);
 
     EXPECT_FALSE(anyf.isReady());
 
@@ -764,7 +982,7 @@ TEST(Future, whenAny) {
     for (auto& p : promises)
       futures.push_back(p.getFuture());
 
-    auto anyf = whenAny(futures.begin(), futures.end())
+    auto anyf = collectAny(futures)
       .then([](pair<size_t, Try<int>> p) {
         EXPECT_EQ(42, p.second.value());
       });
@@ -781,7 +999,7 @@ TEST(when, already_completed) {
     for (int i = 0; i < 10; i++)
       fs.push_back(makeFuture());
 
-    whenAll(fs.begin(), fs.end())
+    collectAll(fs)
       .then([&](vector<Try<void>> ts) {
         EXPECT_EQ(fs.size(), ts.size());
       });
@@ -791,14 +1009,14 @@ TEST(when, already_completed) {
     for (int i = 0; i < 10; i++)
       fs.push_back(makeFuture(i));
 
-    whenAny(fs.begin(), fs.end())
+    collectAny(fs)
       .then([&](pair<size_t, Try<int>> p) {
         EXPECT_EQ(p.first, p.second.value());
       });
   }
 }
 
-TEST(when, whenN) {
+TEST(when, collectN) {
   vector<Promise<void>> promises(10);
   vector<Future<void>> futures;
 
@@ -807,7 +1025,7 @@ TEST(when, whenN) {
 
   bool flag = false;
   size_t n = 3;
-  whenN(futures.begin(), futures.end(), n)
+  collectN(futures, n)
     .then([&](vector<pair<size_t, Try<void>>> v) {
       flag = true;
       EXPECT_EQ(n, v.size());
@@ -838,7 +1056,7 @@ TEST(when, small_vector) {
     for (int i = 0; i < 10; i++)
       futures.push_back(makeFuture());
 
-    auto anyf = whenAny(futures.begin(), futures.end());
+    auto anyf = collectAny(futures);
   }
 
   {
@@ -847,17 +1065,17 @@ TEST(when, small_vector) {
     for (int i = 0; i < 10; i++)
       futures.push_back(makeFuture());
 
-    auto allf = whenAll(futures.begin(), futures.end());
+    auto allf = collectAll(futures);
   }
 }
 
-TEST(Future, whenAllVariadic) {
+TEST(Future, collectAllVariadic) {
   Promise<bool> pb;
   Promise<int> pi;
   Future<bool> fb = pb.getFuture();
   Future<int> fi = pi.getFuture();
   bool flag = false;
-  whenAll(std::move(fb), std::move(fi))
+  collectAll(std::move(fb), std::move(fi))
     .then([&](std::tuple<Try<bool>, Try<int>> tup) {
       flag = true;
       EXPECT_TRUE(std::get<0>(tup).hasValue());
@@ -871,13 +1089,13 @@ TEST(Future, whenAllVariadic) {
   EXPECT_TRUE(flag);
 }
 
-TEST(Future, whenAllVariadicReferences) {
+TEST(Future, collectAllVariadicReferences) {
   Promise<bool> pb;
   Promise<int> pi;
   Future<bool> fb = pb.getFuture();
   Future<int> fi = pi.getFuture();
   bool flag = false;
-  whenAll(fb, fi)
+  collectAll(fb, fi)
     .then([&](std::tuple<Try<bool>, Try<int>> tup) {
       flag = true;
       EXPECT_TRUE(std::get<0>(tup).hasValue());
@@ -891,9 +1109,9 @@ TEST(Future, whenAllVariadicReferences) {
   EXPECT_TRUE(flag);
 }
 
-TEST(Future, whenAll_none) {
+TEST(Future, collectAll_none) {
   vector<Future<int>> fs;
-  auto f = whenAll(fs.begin(), fs.end());
+  auto f = collectAll(fs);
   EXPECT_TRUE(f.isReady());
 }
 
@@ -938,13 +1156,13 @@ TEST(Future, waitImmediate) {
   vector<Future<void>> v_f;
   v_f.push_back(makeFuture());
   v_f.push_back(makeFuture());
-  auto done_v_f = whenAll(v_f.begin(), v_f.end()).wait().value();
+  auto done_v_f = collectAll(v_f).wait().value();
   EXPECT_EQ(2, done_v_f.size());
 
   vector<Future<bool>> v_fb;
   v_fb.push_back(makeFuture(true));
   v_fb.push_back(makeFuture(false));
-  auto fut = whenAll(v_fb.begin(), v_fb.end());
+  auto fut = collectAll(v_fb);
   auto done_v_fb = std::move(fut.wait().value());
   EXPECT_EQ(2, done_v_fb.size());
 }
@@ -1044,7 +1262,7 @@ TEST(Future, waitWithDuration) {
   vector<Future<bool>> v_fb;
   v_fb.push_back(makeFuture(true));
   v_fb.push_back(makeFuture(false));
-  auto f = whenAll(v_fb.begin(), v_fb.end());
+  auto f = collectAll(v_fb);
   f.wait(milliseconds(1));
   EXPECT_TRUE(f.isReady());
   EXPECT_EQ(2, f.value().size());
@@ -1055,7 +1273,7 @@ TEST(Future, waitWithDuration) {
   Promise<bool> p2;
   v_fb.push_back(p1.getFuture());
   v_fb.push_back(p2.getFuture());
-  auto f = whenAll(v_fb.begin(), v_fb.end());
+  auto f = collectAll(v_fb);
   f.wait(milliseconds(1));
   EXPECT_FALSE(f.isReady());
   p1.setValue(true);
@@ -1180,7 +1398,7 @@ TEST(Future, getFuture_after_setValue) {
 
 TEST(Future, getFuture_after_setException) {
   Promise<void> p;
-  p.fulfil([]() -> void { throw std::logic_error("foo"); });
+  p.setWith([]() -> void { throw std::logic_error("foo"); });
   EXPECT_THROW(p.getFuture().value(), std::logic_error);
 }
 
@@ -1242,7 +1460,7 @@ TEST(Future, context) {
 
   EXPECT_EQ(nullptr, RequestContext::get()->getContextData("test"));
 
-  // Fulfil the promise
+  // Fulfill the promise
   p.setValue();
 }
 
@@ -1267,7 +1485,7 @@ TEST(Future, t5506504) {
       for (auto& p : *promises) p.setValue();
     });
 
-    return whenAll(futures.begin(), futures.end());
+    return collectAll(futures);
   };
 
   fn().wait();
@@ -1294,7 +1512,7 @@ TEST(Future, CircularDependencySharedPtrSelfReset) {
 
   ptr.reset();
 
-  promise.fulfil([]{return 1l;});
+  promise.setWith([]{return 1l;});
 }
 
 TEST(Future, Constructor) {
@@ -1473,7 +1691,7 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(0);
 
-    Future<double> f1 = reduce(fs.begin(), fs.end(), 1.2,
+    Future<double> f1 = reduce(fs, 1.2,
       [](double a, Try<int>&& b){
         return a + *b + 0.1;
       });
@@ -1484,7 +1702,7 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(1);
 
-    Future<double> f1 = reduce(fs.begin(), fs.end(), 0.0,
+    Future<double> f1 = reduce(fs, 0.0,
       [](double a, Try<int>&& b){
         return a + *b + 0.1;
       });
@@ -1495,7 +1713,7 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(3);
 
-    Future<double> f1 = reduce(fs.begin(), fs.end(), 0.0,
+    Future<double> f1 = reduce(fs, 0.0,
       [](double a, Try<int>&& b){
         return a + *b + 0.1;
       });
@@ -1506,7 +1724,7 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(3);
 
-    Future<double> f1 = reduce(fs.begin(), fs.end(), 0.0,
+    Future<double> f1 = reduce(fs, 0.0,
       [](double a, int&& b){
         return a + b + 0.1;
       });
@@ -1517,7 +1735,7 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(3);
 
-    Future<double> f2 = reduce(fs.begin(), fs.end(), 0.0,
+    Future<double> f2 = reduce(fs, 0.0,
       [](double a, Try<int>&& b){
         return makeFuture<double>(a + *b + 0.1);
       });
@@ -1528,10 +1746,59 @@ TEST(Reduce, Basic) {
   {
     auto fs = makeFutures(3);
 
-    Future<double> f2 = reduce(fs.begin(), fs.end(), 0.0,
+    Future<double> f2 = reduce(fs, 0.0,
       [](double a, int&& b){
         return makeFuture<double>(a + b + 0.1);
       });
     EXPECT_EQ(6.3, f2.get());
   }
+}
+
+TEST(Reduce, Chain) {
+  auto makeFutures = [](int count) {
+    std::vector<Future<int>> fs;
+    for (int i = 1; i <= count; ++i) {
+      fs.emplace_back(makeFuture(i));
+    }
+    return fs;
+  };
+
+  {
+    auto f = collectAll(makeFutures(3)).reduce(0, [](int a, Try<int>&& b){
+      return a + *b;
+    });
+    EXPECT_EQ(6, f.get());
+  }
+  {
+    auto f = collect(makeFutures(3)).reduce(0, [](int a, int&& b){
+      return a + b;
+    });
+    EXPECT_EQ(6, f.get());
+  }
+}
+
+TEST(Map, Basic) {
+  Promise<int> p1;
+  Promise<int> p2;
+  Promise<int> p3;
+
+  std::vector<Future<int>> fs;
+  fs.push_back(p1.getFuture());
+  fs.push_back(p2.getFuture());
+  fs.push_back(p3.getFuture());
+
+  int c = 0;
+  std::vector<Future<void>> fs2 = futures::map(fs, [&](int i){
+    c += i;
+  });
+
+  // Ensure we call the callbacks as the futures complete regardless of order
+  p2.setValue(1);
+  EXPECT_EQ(1, c);
+  p3.setValue(1);
+  EXPECT_EQ(2, c);
+  p1.setValue(1);
+  EXPECT_EQ(3, c);
+
+  EXPECT_TRUE(collect(fs2).isReady());
 }

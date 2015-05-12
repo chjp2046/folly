@@ -611,7 +611,7 @@ bool EventBase::runInEventBaseThreadAndWait(const Cob& fn) {
 }
 
 bool EventBase::runImmediatelyOrRunInEventBaseThreadAndWait(const Cob& fn) {
-  if (inRunningEventBaseThread()) {
+  if (isInEventBaseThread()) {
     fn();
     return true;
   } else {
@@ -781,7 +781,7 @@ void EventBase::detachTimeoutManager(AsyncTimeout* obj) {
 }
 
 bool EventBase::scheduleTimeout(AsyncTimeout* obj,
-                                 std::chrono::milliseconds timeout) {
+                                 TimeoutManager::timeout_type timeout) {
   assert(isInEventBaseThread());
   // Set up the timeval and add the event
   struct timeval tv;

@@ -80,8 +80,10 @@ nobase_follyinclude_HEADERS = \
 	experimental/fibers/BoostContextCompatibility.h \
 	experimental/fibers/EventBaseLoopController.h \
 	experimental/fibers/EventBaseLoopController-inl.h \
+	experimental/fibers/ExecutionObserver.h \
 	experimental/fibers/Fiber.h \
 	experimental/fibers/Fiber-inl.h \
+	experimental/fibers/FiberIOExecutor.h \
 	experimental/fibers/FiberManager.h \
 	experimental/fibers/FiberManager-inl.h \
 	experimental/fibers/FiberManagerMap.h \
@@ -103,8 +105,6 @@ nobase_follyinclude_HEADERS = \
 	experimental/JSONSchema.h \
 	experimental/Select64.h \
 	experimental/SharedMutex.h \
-	experimental/Singleton.h \
-	experimental/Singleton-inl.h \
 	experimental/StringKeyedCommon.h \
 	experimental/StringKeyedUnorderedMap.h \
 	experimental/StringKeyedUnorderedSet.h \
@@ -121,8 +121,10 @@ nobase_follyinclude_HEADERS = \
 	Format-inl.h \
 	futures/Deprecated.h \
 	futures/DrivableExecutor.h \
-	futures/Future-inl.h \
+	futures/Future-pre.h \
+	futures/helpers.h \
 	futures/Future.h \
+	futures/Future-inl.h \
 	futures/FutureException.h \
 	futures/InlineExecutor.h \
 	futures/ManualExecutor.h \
@@ -134,6 +136,7 @@ nobase_follyinclude_HEADERS = \
 	futures/Timekeeper.h \
 	futures/Try-inl.h \
 	futures/Try.h \
+	futures/Unit.h \
 	futures/detail/Core.h \
 	futures/detail/FSM.h \
 	futures/detail/ThreadWheelTimekeeper.h \
@@ -222,6 +225,8 @@ nobase_follyinclude_HEADERS = \
 	Range.h \
 	RWSpinLock.h \
 	ScopeGuard.h \
+	Singleton.h \
+	Singleton-inl.h \
 	SmallLocks.h \
 	small_vector.h \
 	SocketAddress.h \
@@ -271,10 +276,14 @@ nobase_follyinclude_HEADERS = \
 	wangle/bootstrap/ServerSocketFactory.h \
 	wangle/bootstrap/ClientBootstrap.h \
 	wangle/channel/AsyncSocketHandler.h \
-	wangle/channel/ChannelHandler.h \
-	wangle/channel/ChannelHandlerContext.h \
-	wangle/channel/ChannelPipeline.h \
+	wangle/channel/EventBaseHandler.h \
+	wangle/channel/Handler.h \
+	wangle/channel/HandlerContext.h \
+	wangle/channel/HandlerContext-inl.h \
 	wangle/channel/OutputBufferingHandler.h \
+	wangle/channel/Pipeline.h \
+	wangle/channel/Pipeline-inl.h \
+	wangle/channel/StaticPipeline.h \
 	wangle/concurrent/BlockingQueue.h \
 	wangle/concurrent/Codel.h \
 	wangle/concurrent/CPUThreadPoolExecutor.h \
@@ -371,6 +380,7 @@ libfolly_la_SOURCES = \
 	Random.cpp \
 	SafeAssert.cpp \
 	SocketAddress.cpp \
+	Singleton.cpp \
 	SpookyHashV1.cpp \
 	SpookyHashV2.cpp \
 	stats/Instantiations.cpp \
@@ -389,7 +399,6 @@ libfolly_la_SOURCES = \
 	experimental/JSONSchema.cpp \
 	experimental/Select64.cpp \
 	experimental/SharedMutex.cpp \
-	experimental/Singleton.cpp \
 	experimental/TestUtil.cpp \
 	wangle/acceptor/Acceptor.cpp \
 	wangle/acceptor/ConnectionManager.cpp \

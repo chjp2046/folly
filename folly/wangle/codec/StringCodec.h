@@ -16,22 +16,21 @@
 
 #pragma once
 
-#include <folly/wangle/channel/ChannelHandler.h>
+#include <folly/wangle/channel/Handler.h>
 
 namespace folly { namespace wangle {
 
 /*
  * StringCodec converts a pipeline from IOBufs to std::strings.
  */
-class StringCodec : public ChannelHandler<IOBufQueue&, std::string,
-                                          std::string, std::unique_ptr<IOBuf>> {
+class StringCodec : public Handler<std::unique_ptr<IOBuf>, std::string,
+                                   std::string, std::unique_ptr<IOBuf>> {
  public:
-  typedef typename ChannelHandler<
-   IOBufQueue&, std::string,
+  typedef typename Handler<
+   std::unique_ptr<IOBuf>, std::string,
    std::string, std::unique_ptr<IOBuf>>::Context Context;
 
-  void read(Context* ctx, IOBufQueue& q) override {
-    auto buf = q.pop_front();
+  void read(Context* ctx, std::unique_ptr<IOBuf> buf) override {
     buf->coalesce();
     std::string data((const char*)buf->data(), buf->length());
 

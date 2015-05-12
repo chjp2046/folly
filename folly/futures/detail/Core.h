@@ -68,7 +68,7 @@ enum class State : uint8_t {
 /// migrate between threads, though this usually happens within the API code.
 /// For example, an async operation will probably make a Promise, grab its
 /// Future, then move the Promise into another thread that will eventually
-/// fulfil it. With executors and via, this gets slightly more complicated at
+/// fulfill it. With executors and via, this gets slightly more complicated at
 /// first blush, but it's the same principle. In general, as long as the user
 /// doesn't access a Future or Promise object from more than one thread at a
 /// time there won't be any problems.
@@ -198,7 +198,7 @@ class Core {
 
   /// Called by a destructing Future (in the Future thread, by definition)
   void detachFuture() {
-    activateNoDeprecatedWarning();
+    activate();
     detachOne();
   }
 
@@ -213,13 +213,14 @@ class Core {
   }
 
   /// May call from any thread
-  void deactivate() DEPRECATED {
+  void deactivate() {
     active_ = false;
   }
 
   /// May call from any thread
-  void activate() DEPRECATED {
-    activateNoDeprecatedWarning();
+  void activate() {
+    active_ = true;
+    maybeCallback();
   }
 
   /// May call from any thread
@@ -258,11 +259,6 @@ class Core {
   }
 
  protected:
-  void activateNoDeprecatedWarning() {
-    active_ = true;
-    maybeCallback();
-  }
-
   void maybeCallback() {
     FSM_START(fsm_)
       case State::Armed:
@@ -278,18 +274,21 @@ class Core {
   }
 
   void doCallback() {
-    // TODO(5306911) we should probably try/catch around the callback
-
     RequestContext::setContext(context_);
 
     // TODO(6115514) semantic race on reading executor_ and setExecutor()
     Executor* x = executor_;
     if (x) {
       ++attached_; // keep Core alive until executor did its thing
-      x->add([this]() mutable {
-        SCOPE_EXIT { detachOne(); };
+      try {
+        x->add([this]() mutable {
+          SCOPE_EXIT { detachOne(); };
+          callback_(std::move(*result_));
+        });
+      } catch (...) {
+        result_ = Try<T>(exception_wrapper(std::current_exception()));
         callback_(std::move(*result_));
-      });
+      }
     } else {
       callback_(std::move(*result_));
     }
@@ -320,59 +319,33 @@ class Core {
 
 template <typename... Ts>
 struct VariadicContext {
-  VariadicContext() : total(0), count(0) {}
-  Promise<std::tuple<Try<Ts>... > > p;
+  VariadicContext() {}
+  ~VariadicContext() {
+    p.setValue(std::move(results));
+  }
+  Promise<std::tuple<Try<Ts>... >> p;
   std::tuple<Try<Ts>... > results;
-  size_t total;
-  std::atomic<size_t> count;
   typedef Future<std::tuple<Try<Ts>...>> type;
 };
 
 template <typename... Ts, typename THead, typename... Fs>
 typename std::enable_if<sizeof...(Fs) == 0, void>::type
-whenAllVariadicHelper(VariadicContext<Ts...> *ctx, THead&& head, Fs&&... tail) {
+collectAllVariadicHelper(std::shared_ptr<VariadicContext<Ts...>> ctx,
+                         THead&& head, Fs&&... tail) {
   head.setCallback_([ctx](Try<typename THead::value_type>&& t) {
     std::get<sizeof...(Ts) - sizeof...(Fs) - 1>(ctx->results) = std::move(t);
-    if (++ctx->count == ctx->total) {
-      ctx->p.setValue(std::move(ctx->results));
-      delete ctx;
-    }
   });
 }
 
 template <typename... Ts, typename THead, typename... Fs>
 typename std::enable_if<sizeof...(Fs) != 0, void>::type
-whenAllVariadicHelper(VariadicContext<Ts...> *ctx, THead&& head, Fs&&... tail) {
+collectAllVariadicHelper(std::shared_ptr<VariadicContext<Ts...>> ctx,
+                         THead&& head, Fs&&... tail) {
   head.setCallback_([ctx](Try<typename THead::value_type>&& t) {
     std::get<sizeof...(Ts) - sizeof...(Fs) - 1>(ctx->results) = std::move(t);
-    if (++ctx->count == ctx->total) {
-      ctx->p.setValue(std::move(ctx->results));
-      delete ctx;
-    }
   });
   // template tail-recursion
-  whenAllVariadicHelper(ctx, std::forward<Fs>(tail)...);
+  collectAllVariadicHelper(ctx, std::forward<Fs>(tail)...);
 }
-
-template <typename T>
-struct WhenAllContext {
-  WhenAllContext() : count(0) {}
-  Promise<std::vector<Try<T> > > p;
-  std::vector<Try<T> > results;
-  std::atomic<size_t> count;
-};
-
-template <typename T>
-struct WhenAnyContext {
-  explicit WhenAnyContext(size_t n) : done(false), ref_count(n) {};
-  Promise<std::pair<size_t, Try<T>>> p;
-  std::atomic<bool> done;
-  std::atomic<size_t> ref_count;
-  void decref() {
-    if (--ref_count == 0) {
-      delete this;
-    }
-  }
-};
 
 }} // folly::detail

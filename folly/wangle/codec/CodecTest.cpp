@@ -16,22 +16,22 @@
 #include <gtest/gtest.h>
 
 #include <folly/wangle/codec/FixedLengthFrameDecoder.h>
-#include <folly/wangle/codec/LineBasedFrameDecoder.h>
 #include <folly/wangle/codec/LengthFieldBasedFrameDecoder.h>
 #include <folly/wangle/codec/LengthFieldPrepender.h>
+#include <folly/wangle/codec/LineBasedFrameDecoder.h>
 
 using namespace folly;
 using namespace folly::wangle;
 using namespace folly::io;
 
 class FrameTester
-    : public BytesToBytesHandler {
+    : public InboundHandler<std::unique_ptr<IOBuf>> {
  public:
-  FrameTester(std::function<void(std::unique_ptr<IOBuf>)> test)
+  explicit FrameTester(std::function<void(std::unique_ptr<IOBuf>)> test)
     : test_(test) {}
 
-  void read(Context* ctx, IOBufQueue& q) {
-    test_(q.move());
+  void read(Context* ctx, std::unique_ptr<IOBuf> buf) {
+    test_(std::move(buf));
   }
 
   void readException(Context* ctx, exception_wrapper w) {
@@ -54,8 +54,8 @@ class BytesReflector
   }
 };
 
-TEST(CodecTest, FixedLengthFrameDecoder) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(FixedLengthFrameDecoder, FailWhenLengthFieldEndOffset) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -89,19 +89,19 @@ TEST(CodecTest, FixedLengthFrameDecoder) {
   EXPECT_EQ(called, 3);
 }
 
-TEST(CodecTest, LengthFieldFramePipeline) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFramePipeline, SimpleTest) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
     .addBack(BytesReflector())
+    .addBack(LengthFieldPrepender())
     .addBack(LengthFieldBasedFrameDecoder())
     .addBack(FrameTester([&](std::unique_ptr<IOBuf> buf) {
         auto sz = buf->computeChainDataLength();
         called++;
         EXPECT_EQ(sz, 2);
       }))
-    .addBack(LengthFieldPrepender())
     .finalize();
 
   auto buf = IOBuf::create(2);
@@ -110,8 +110,8 @@ TEST(CodecTest, LengthFieldFramePipeline) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFramePipelineLittleEndian) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFramePipeline, LittleEndian) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -131,8 +131,8 @@ TEST(CodecTest, LengthFieldFramePipelineLittleEndian) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderSimple) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, Simple) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -162,8 +162,8 @@ TEST(CodecTest, LengthFieldFrameDecoderSimple) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderNoStrip) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, NoStrip) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -193,8 +193,8 @@ TEST(CodecTest, LengthFieldFrameDecoderNoStrip) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderAdjustment) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, Adjustment) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -224,8 +224,8 @@ TEST(CodecTest, LengthFieldFrameDecoderAdjustment) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderPreHeader) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, PreHeader) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -256,8 +256,8 @@ TEST(CodecTest, LengthFieldFrameDecoderPreHeader) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderPostHeader) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, PostHeader) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -288,8 +288,8 @@ TEST(CodecTest, LengthFieldFrameDecoderPostHeader) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderStripPrePostHeader) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoderStrip, PrePostHeader) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -321,8 +321,8 @@ TEST(CodecTest, LengthFieldFrameDecoderStripPrePostHeader) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LengthFieldFrameDecoderStripPrePostHeaderFrameInclHeader) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, StripPrePostHeaderFrameInclHeader) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -354,8 +354,87 @@ TEST(CodecTest, LengthFieldFrameDecoderStripPrePostHeaderFrameInclHeader) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LineBasedFrameDecoder) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LengthFieldFrameDecoder, FailTestLengthFieldEndOffset) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+  int called = 0;
+
+  pipeline
+    .addBack(LengthFieldBasedFrameDecoder(4, 10, 4, -2, 4))
+    .addBack(FrameTester([&](std::unique_ptr<IOBuf> buf) {
+        ASSERT_EQ(nullptr, buf);
+        called++;
+      }))
+    .finalize();
+
+  auto bufFrame = IOBuf::create(8);
+  bufFrame->append(8);
+  RWPrivateCursor c(bufFrame.get());
+  c.writeBE((uint32_t)0); // frame size
+  c.write((uint32_t)0); // crap
+
+  IOBufQueue q(IOBufQueue::cacheChainLength());
+
+  q.append(std::move(bufFrame));
+  pipeline.read(q);
+  EXPECT_EQ(called, 1);
+}
+
+TEST(LengthFieldFrameDecoder, FailTestLengthFieldFrameSize) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+  int called = 0;
+
+  pipeline
+    .addBack(LengthFieldBasedFrameDecoder(4, 10, 0, 0, 4))
+    .addBack(FrameTester([&](std::unique_ptr<IOBuf> buf) {
+        ASSERT_EQ(nullptr, buf);
+        called++;
+      }))
+    .finalize();
+
+  auto bufFrame = IOBuf::create(16);
+  bufFrame->append(16);
+  RWPrivateCursor c(bufFrame.get());
+  c.writeBE((uint32_t)12); // frame size
+  c.write((uint32_t)0); // nothing
+  c.write((uint32_t)0); // nothing
+  c.write((uint32_t)0); // nothing
+
+  IOBufQueue q(IOBufQueue::cacheChainLength());
+
+  q.append(std::move(bufFrame));
+  pipeline.read(q);
+  EXPECT_EQ(called, 1);
+}
+
+TEST(LengthFieldFrameDecoder, FailTestLengthFieldInitialBytes) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+  int called = 0;
+
+  pipeline
+    .addBack(LengthFieldBasedFrameDecoder(4, 10, 0, 0, 10))
+    .addBack(FrameTester([&](std::unique_ptr<IOBuf> buf) {
+        ASSERT_EQ(nullptr, buf);
+        called++;
+      }))
+    .finalize();
+
+  auto bufFrame = IOBuf::create(16);
+  bufFrame->append(16);
+  RWPrivateCursor c(bufFrame.get());
+  c.writeBE((uint32_t)4); // frame size
+  c.write((uint32_t)0); // nothing
+  c.write((uint32_t)0); // nothing
+  c.write((uint32_t)0); // nothing
+
+  IOBufQueue q(IOBufQueue::cacheChainLength());
+
+  q.append(std::move(bufFrame));
+  pipeline.read(q);
+  EXPECT_EQ(called, 1);
+}
+
+TEST(LineBasedFrameDecoder, Simple) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -405,8 +484,8 @@ TEST(CodecTest, LineBasedFrameDecoder) {
   EXPECT_EQ(called, 2);
 }
 
-TEST(CodecTest, LineBasedFrameDecoderSaveDelimiter) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LineBasedFrameDecoder, SaveDelimiter) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -454,13 +533,14 @@ TEST(CodecTest, LineBasedFrameDecoderSaveDelimiter) {
   EXPECT_EQ(called, 2);
 }
 
-TEST(CodecTest, LineBasedFrameDecoderFail) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LineBasedFrameDecoder, Fail) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
     .addBack(LineBasedFrameDecoder(10))
     .addBack(FrameTester([&](std::unique_ptr<IOBuf> buf) {
+        ASSERT_EQ(nullptr, buf);
         called++;
       }))
     .finalize();
@@ -501,8 +581,8 @@ TEST(CodecTest, LineBasedFrameDecoderFail) {
   EXPECT_EQ(called, 2);
 }
 
-TEST(CodecTest, LineBasedFrameDecoderNewLineOnly) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LineBasedFrameDecoder, NewLineOnly) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline
@@ -528,8 +608,8 @@ TEST(CodecTest, LineBasedFrameDecoderNewLineOnly) {
   EXPECT_EQ(called, 1);
 }
 
-TEST(CodecTest, LineBasedFrameDecoderCarriageNewLineOnly) {
-  ChannelPipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
+TEST(LineBasedFrameDecoder, CarriageNewLineOnly) {
+  Pipeline<IOBufQueue&, std::unique_ptr<IOBuf>> pipeline;
   int called = 0;
 
   pipeline

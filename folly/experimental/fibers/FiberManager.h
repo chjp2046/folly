@@ -24,11 +24,13 @@
 #include <vector>
 
 #include <folly/AtomicLinkedList.h>
+#include <folly/Executor.h>
 #include <folly/Likely.h>
 #include <folly/IntrusiveList.h>
 #include <folly/futures/Try.h>
 
 #include <folly/experimental/fibers/BoostContextCompatibility.h>
+#include <folly/experimental/fibers/ExecutionObserver.h>
 #include <folly/experimental/fibers/Fiber.h>
 #include <folly/experimental/fibers/traits.h>
 
@@ -56,18 +58,11 @@ class LocalType {
  * call. This will pause execution of this task and it will be resumed only
  * when it is unblocked (via setData()).
  */
-class FiberManager {
+class FiberManager : public ::folly::Executor {
  public:
   struct Options {
-#ifdef FOLLY_SANITIZE_ADDRESS
-    /* ASAN needs a lot of extra stack space.
-       16x is a conservative estimate, 8x also worked with tests
-       where it mattered.  Note that overallocating here does not necessarily
-       increase RSS, since unused memory is pretty much free. */
-    static constexpr size_t kDefaultStackSize{16 * 16 * 1024};
-#else
     static constexpr size_t kDefaultStackSize{16 * 1024};
-#endif
+
     /**
      * Maximum stack size for fibers which will be used for executing all the
      * tasks.
@@ -169,6 +164,11 @@ class FiberManager {
   template <typename F>
   void addTaskRemote(F&& func);
 
+  // Executor interface calls addTaskRemote
+  void add(std::function<void()> f) {
+    addTaskRemote(std::move(f));
+  }
+
   /**
    * Add a new task. When the task is complete, execute finally(Try<Result>&&)
    * on the main context.
@@ -233,6 +233,14 @@ class FiberManager {
    * serviced.
    */
   void yield();
+
+  /**
+   * Setup fibers execution observation/instrumentation. Fiber locals are
+   * available to observer.
+   *
+   * @param observer  Fiber's execution observer.
+   */
+  void setObserver(ExecutionObserver* observer);
 
   static FiberManager& getFiberManager();
   static FiberManager* getFiberManagerUnsafe();
@@ -348,6 +356,11 @@ class FiberManager {
    * Function passed to the runInMainContext call.
    */
   std::function<void()> immediateFunc_;
+
+  /**
+   * Fiber's execution observer.
+   */
+  ExecutionObserver* observer_{nullptr};
 
   ExceptionCallback exceptionCallback_; /**< task exception callback */
 

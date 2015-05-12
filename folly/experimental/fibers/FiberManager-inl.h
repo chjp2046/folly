@@ -17,17 +17,33 @@
 
 #include <cassert>
 
+#include <folly/CPortability.h>
+#include <folly/experimental/fibers/Baton.h>
+#include <folly/experimental/fibers/Fiber.h>
+#include <folly/experimental/fibers/LoopController.h>
+#include <folly/experimental/fibers/Promise.h>
+#include <folly/futures/Try.h>
 #include <folly/Memory.h>
 #include <folly/Optional.h>
 #include <folly/Portability.h>
 #include <folly/ScopeGuard.h>
-#include <folly/experimental/fibers/Baton.h>
-#include <folly/experimental/fibers/Fiber.h>
-#include <folly/experimental/fibers/Promise.h>
-#include <folly/experimental/fibers/LoopController.h>
-#include <folly/futures/Try.h>
 
 namespace folly { namespace fibers {
+
+namespace {
+
+inline FiberManager::Options preprocessOptions(FiberManager::Options opts) {
+#ifdef FOLLY_SANITIZE_ADDRESS
+  /* ASAN needs a lot of extra stack space.
+     16x is a conservative estimate, 8x also worked with tests
+     where it mattered.  Note that overallocating here does not necessarily
+     increase RSS, since unused memory is pretty much free. */
+  opts.stackSize *= 16;
+#endif
+  return opts;
+}
+
+}  // anonymous
 
 inline void FiberManager::ensureLoopScheduled() {
   if (isLoopScheduled_) {
@@ -39,9 +55,17 @@ inline void FiberManager::ensureLoopScheduled() {
 }
 
 inline void FiberManager::runReadyFiber(Fiber* fiber) {
+  SCOPE_EXIT {
+    assert(currentFiber_ == nullptr);
+    assert(activeFiber_ == nullptr);
+  };
+
   assert(fiber->state_ == Fiber::NOT_STARTED ||
          fiber->state_ == Fiber::READY_TO_RUN);
   currentFiber_ = fiber;
+  if (observer_) {
+    observer_->starting();
+  }
 
   while (fiber->state_ == Fiber::NOT_STARTED ||
          fiber->state_ == Fiber::READY_TO_RUN) {
@@ -61,6 +85,10 @@ inline void FiberManager::runReadyFiber(Fiber* fiber) {
   if (fiber->state_ == Fiber::AWAITING) {
     awaitFunc_(*fiber);
     awaitFunc_ = nullptr;
+    if (observer_) {
+      observer_->stopped();
+    }
+    currentFiber_ = nullptr;
   } else if (fiber->state_ == Fiber::INVALID) {
     assert(fibersActive_ > 0);
     --fibersActive_;
@@ -77,6 +105,11 @@ inline void FiberManager::runReadyFiber(Fiber* fiber) {
       }
       fiber->finallyFunc_ = nullptr;
     }
+    // Make sure LocalData is not accessible from its destructor
+    if (observer_) {
+      observer_->stopped();
+    }
+    currentFiber_ = nullptr;
     fiber->localData_.reset();
 
     if (fibersPoolSize_ < options_.maxFibersPoolSize) {
@@ -88,15 +121,21 @@ inline void FiberManager::runReadyFiber(Fiber* fiber) {
       --fibersAllocated_;
     }
   } else if (fiber->state_ == Fiber::YIELDED) {
+    if (observer_) {
+      observer_->stopped();
+    }
+    currentFiber_ = nullptr;
     fiber->state_ = Fiber::READY_TO_RUN;
     yieldedFibers_.push_back(*fiber);
   }
-  currentFiber_ = nullptr;
 }
 
 inline bool FiberManager::loopUntilNoReady() {
   SCOPE_EXIT {
     isLoopScheduled_ = false;
+    if (!readyFibers_.empty()) {
+      ensureLoopScheduled();
+    }
     currentFiberManager_ = nullptr;
   };
 
@@ -135,10 +174,7 @@ inline bool FiberManager::loopUntilNoReady() {
     );
   }
 
-  if (!yieldedFibers_.empty()) {
-    readyFibers_.splice(readyFibers_.end(), yieldedFibers_);
-    ensureLoopScheduled();
-  }
+  readyFibers_.splice(readyFibers_.end(), yieldedFibers_);
 
   return fibersActive_ > 0;
 }
@@ -421,7 +457,7 @@ FiberManager::FiberManager(
   std::unique_ptr<LoopController> loopController__,
   Options options)  :
     loopController_(std::move(loopController__)),
-    options_(std::move(options)),
+    options_(preprocessOptions(std::move(options))),
     exceptionCallback_([](std::exception_ptr eptr, std::string context) {
         try {
           std::rethrow_exception(eptr);

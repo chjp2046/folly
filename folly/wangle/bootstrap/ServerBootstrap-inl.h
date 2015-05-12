@@ -20,39 +20,47 @@
 #include <folly/io/async/EventBaseManager.h>
 #include <folly/wangle/concurrent/IOThreadPoolExecutor.h>
 #include <folly/wangle/acceptor/ManagedConnection.h>
-#include <folly/wangle/channel/ChannelPipeline.h>
-#include <folly/wangle/channel/ChannelHandler.h>
+#include <folly/wangle/channel/Pipeline.h>
+#include <folly/wangle/channel/Handler.h>
 
 namespace folly {
 
 template <typename Pipeline>
 class ServerAcceptor
     : public Acceptor
-    , public folly::wangle::ChannelHandlerAdapter<void*, std::exception> {
+    , public folly::wangle::InboundHandler<void*> {
   typedef std::unique_ptr<Pipeline,
                           folly::DelayedDestruction::Destructor> PipelinePtr;
 
-  class ServerConnection : public wangle::ManagedConnection {
+  class ServerConnection : public wangle::ManagedConnection,
+                           public wangle::PipelineManager {
    public:
     explicit ServerConnection(PipelinePtr pipeline)
-        : pipeline_(std::move(pipeline)) {}
-
-    ~ServerConnection() {
+        : pipeline_(std::move(pipeline)) {
+      pipeline_->setPipelineManager(this);
     }
 
-    void timeoutExpired() noexcept {
+    ~ServerConnection() {}
+
+    void timeoutExpired() noexcept override {
     }
 
-    void describe(std::ostream& os) const {}
-    bool isBusy() const {
+    void describe(std::ostream& os) const override {}
+    bool isBusy() const override {
       return false;
     }
-    void notifyPendingShutdown() {}
-    void closeWhenIdle() {}
-    void dropConnection() {
+    void notifyPendingShutdown() override {}
+    void closeWhenIdle() override {}
+    void dropConnection() override {
       delete this;
     }
-    void dumpConnectionState(uint8_t loglevel) {}
+    void dumpConnectionState(uint8_t loglevel) override {}
+
+    void deletePipeline(wangle::PipelineBase* p) override {
+      CHECK(p == pipeline_.get());
+      delete this;
+    }
+
    private:
     PipelinePtr pipeline_;
   };
@@ -60,8 +68,7 @@ class ServerAcceptor
  public:
   explicit ServerAcceptor(
         std::shared_ptr<PipelineFactory<Pipeline>> pipelineFactory,
-        std::shared_ptr<folly::wangle::ChannelPipeline<
-                          void*, std::exception>> acceptorPipeline,
+        std::shared_ptr<folly::wangle::Pipeline<void*>> acceptorPipeline,
         EventBase* base)
       : Acceptor(ServerSocketConfig())
       , base_(base)
@@ -70,7 +77,7 @@ class ServerAcceptor
     Acceptor::init(nullptr, base_);
     CHECK(acceptorPipeline_);
 
-    acceptorPipeline_->addBack(folly::wangle::ChannelHandlerPtr<ServerAcceptor, false>(this));
+    acceptorPipeline_->addBack(this);
     acceptorPipeline_->finalize();
   }
 
@@ -84,10 +91,6 @@ class ServerAcceptor
           folly::DelayedDestruction::Destructor())));
     auto connection = new ServerConnection(std::move(pipeline));
     Acceptor::addConnection(connection);
-  }
-
-  folly::Future<void> write(Context* ctx, std::exception e) {
-    return ctx->fireWrite(e);
   }
 
   /* See Acceptor::onNewConnection for details */
@@ -109,8 +112,7 @@ class ServerAcceptor
   EventBase* base_;
 
   std::shared_ptr<PipelineFactory<Pipeline>> childPipelineFactory_;
-  std::shared_ptr<folly::wangle::ChannelPipeline<
-    void*, std::exception>> acceptorPipeline_;
+  std::shared_ptr<folly::wangle::Pipeline<void*>> acceptorPipeline_;
 };
 
 template <typename Pipeline>
@@ -118,22 +120,19 @@ class ServerAcceptorFactory : public AcceptorFactory {
  public:
   explicit ServerAcceptorFactory(
     std::shared_ptr<PipelineFactory<Pipeline>> factory,
-    std::shared_ptr<PipelineFactory<folly::wangle::ChannelPipeline<
-    void*, std::exception>>> pipeline)
+    std::shared_ptr<PipelineFactory<folly::wangle::Pipeline<void*>>> pipeline)
     : factory_(factory)
     , pipeline_(pipeline) {}
 
   std::shared_ptr<Acceptor> newAcceptor(EventBase* base) {
-    std::shared_ptr<folly::wangle::ChannelPipeline<
-                      void*, std::exception>> pipeline(
-                        pipeline_->newPipeline(nullptr));
+    std::shared_ptr<folly::wangle::Pipeline<void*>> pipeline(
+        pipeline_->newPipeline(nullptr));
     return std::make_shared<ServerAcceptor<Pipeline>>(factory_, pipeline, base);
   }
  private:
   std::shared_ptr<PipelineFactory<Pipeline>> factory_;
   std::shared_ptr<PipelineFactory<
-    folly::wangle::ChannelPipeline<
-      void*, std::exception>>> pipeline_;
+    folly::wangle::Pipeline<void*>>> pipeline_;
 };
 
 class ServerWorkerPool : public folly::wangle::ThreadPoolExecutor::Observer {
@@ -183,14 +182,15 @@ void ServerWorkerPool::forEachWorker(F&& f) const {
 }
 
 class DefaultAcceptPipelineFactory
-    : public PipelineFactory<wangle::ChannelPipeline<void*, std::exception>> {
-  typedef wangle::ChannelPipeline<
-      void*,
-      std::exception> AcceptPipeline;
+    : public PipelineFactory<wangle::Pipeline<void*>> {
+  typedef wangle::Pipeline<void*> AcceptPipeline;
 
  public:
-  AcceptPipeline* newPipeline(std::shared_ptr<AsyncSocket>) {
-    return new AcceptPipeline;
+  std::unique_ptr<AcceptPipeline, folly::DelayedDestruction::Destructor>
+    newPipeline(std::shared_ptr<AsyncSocket>) {
+
+    return std::unique_ptr<AcceptPipeline, folly::DelayedDestruction::Destructor>
+      (new AcceptPipeline);
   }
 };
 

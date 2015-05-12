@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <folly/wangle/rx/types.h>
+#include <folly/wangle/rx/types.h> // must come first
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -24,7 +24,7 @@
 
 namespace folly { namespace wangle {
 
-template <class T> class FunctionObserver;
+template <class T> struct FunctionObserver;
 
 /// Observer interface. You can subclass it, or you can just use create()
 /// to use std::functions.
