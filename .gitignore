@@ -7,14 +7,12 @@ Makefile.in
 .libs
 .deps
 stamp-h1
-folly-config.h
 _configs.sed
 aclocal.m4
 autom4te.cache
 build-aux
 libtool
 folly/test/gtest-1.6.0
-folly/folly-config.h
 folly/test/*_benchmark
 folly/test/*_test
 folly/test/*_test_using_jemalloc
