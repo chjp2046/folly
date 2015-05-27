@@ -217,8 +217,8 @@
 #endif
 
 /* Define to 1 if the compiler supports pthread_atfork */
-#ifndef HAVE_PTHREAD_ATFORK
-#define HAVE_PTHREAD_ATFORK 1
+#ifndef FOLLY_HAVE_PTHREAD_ATFORK
+#define FOLLY_HAVE_PTHREAD_ATFORK 1
 #endif
 
 
