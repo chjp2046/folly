@@ -101,14 +101,14 @@ class Try {
   }
 
   // Move constructor
-  Try(Try<T>&& t);
+  Try(Try<T>&& t) noexcept;
   // Move assigner
-  Try& operator=(Try<T>&& t);
+  Try& operator=(Try<T>&& t) noexcept;
 
-  // Non-copyable
-  Try(const Try<T>& t) = delete;
-  // Non-copyable
-  Try& operator=(const Try<T>& t) = delete;
+  // Copy constructor
+  Try(const Try& t);
+  // Copy assigner
+  Try& operator=(const Try& t);
 
   ~Try();
 
@@ -361,10 +361,10 @@ template <typename F>
 typename std::enable_if<
   !std::is_same<typename std::result_of<F()>::type, void>::value,
   Try<typename std::result_of<F()>::type>>::type
-makeTryFunction(F&& f);
+makeTryWith(F&& f);
 
 /*
- * Specialization of makeTryFunction for void
+ * Specialization of makeTryWith for void
  *
  * @param f a function to execute and capture the result of
  *
@@ -374,7 +374,7 @@ template <typename F>
 typename std::enable_if<
   std::is_same<typename std::result_of<F()>::type, void>::value,
   Try<void>>::type
-makeTryFunction(F&& f);
+makeTryWith(F&& f);
 
 } // folly
 

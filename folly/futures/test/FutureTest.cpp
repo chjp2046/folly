@@ -690,6 +690,64 @@ TEST(Future, unwrap) {
   EXPECT_EQ(7, f.value());
 }
 
+TEST(Future, window) {
+  // int -> Future<int>
+  auto fn = [](vector<int> input, size_t window_size, size_t expect) {
+    auto res = reduce(
+      window(
+        input,
+        [](int i) { return makeFuture(i); },
+        2),
+      0,
+      [](int sum, const Try<int>& b) {
+        return sum + *b;
+      }).get();
+    EXPECT_EQ(expect, res);
+  };
+  {
+    // 2 in-flight at a time
+    vector<int> input = {1, 2, 3};
+    fn(input, 2, 6);
+  }
+  {
+    // 4 in-flight at a time
+    vector<int> input = {1, 2, 3};
+    fn(input, 4, 6);
+  }
+  {
+    // empty inpt
+    vector<int> input;
+    fn(input, 1, 0);
+  }
+  {
+    // int -> Future<void>
+    auto res = reduce(
+      window(
+        std::vector<int>({1, 2, 3}),
+        [](int i) { return makeFuture(); },
+        2),
+      0,
+      [](int sum, const Try<void>& b) {
+        EXPECT_TRUE(b.hasValue());
+        return sum + 1;
+      }).get();
+    EXPECT_EQ(3, res);
+  }
+  {
+    // string -> return Future<int>
+    auto res = reduce(
+      window(
+        std::vector<std::string>{"1", "2", "3"},
+        [](std::string s) { return makeFuture<int>(folly::to<int>(s)); },
+        2),
+      0,
+      [](int sum, const Try<int>& b) {
+        return sum + *b;
+      }).get();
+    EXPECT_EQ(6, res);
+  }
+}
+
 TEST(Future, collectAll) {
   // returns a vector variant
   {
@@ -1775,6 +1833,60 @@ TEST(Reduce, Chain) {
     });
     EXPECT_EQ(6, f.get());
   }
+}
+
+TEST(Reduce, UnorderedReduce) {
+  {
+    std::vector<Future<int>> fs;
+    fs.push_back(makeFuture(1));
+    fs.push_back(makeFuture(2));
+    fs.push_back(makeFuture(3));
+
+    Future<double> f = unorderedReduce(fs.begin(), fs.end(), 0.0,
+      [](double a, int&& b){
+        return double(b);
+      });
+    EXPECT_EQ(3.0, f.get());
+  }
+  {
+    Promise<int> p1;
+    Promise<int> p2;
+    Promise<int> p3;
+
+    std::vector<Future<int>> fs;
+    fs.push_back(p1.getFuture());
+    fs.push_back(p2.getFuture());
+    fs.push_back(p3.getFuture());
+
+    Future<double> f = unorderedReduce(fs.begin(), fs.end(), 0.0,
+      [](double a, int&& b){
+        return double(b);
+      });
+    p3.setValue(3);
+    p2.setValue(2);
+    p1.setValue(1);
+    EXPECT_EQ(1.0, f.get());
+  }
+}
+
+TEST(Reduce, UnorderedReduceException) {
+  Promise<int> p1;
+  Promise<int> p2;
+  Promise<int> p3;
+
+  std::vector<Future<int>> fs;
+  fs.push_back(p1.getFuture());
+  fs.push_back(p2.getFuture());
+  fs.push_back(p3.getFuture());
+
+  Future<double> f = unorderedReduce(fs.begin(), fs.end(), 0.0,
+    [](double a, int&& b){
+      return b + 0.0;
+    });
+  p3.setValue(3);
+  p2.setException(exception_wrapper(std::runtime_error("blah")));
+  p1.setValue(1);
+  EXPECT_THROW(f.get(), std::runtime_error);
 }
 
 TEST(Map, Basic) {

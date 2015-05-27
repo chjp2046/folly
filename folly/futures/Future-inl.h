@@ -44,8 +44,7 @@ Future<T>& Future<T>::operator=(Future<T>&& other) noexcept {
 }
 
 template <class T>
-template <class T2,
-          typename std::enable_if<!isFuture<T2>::value, void*>::type>
+template <class T2, typename>
 Future<T>::Future(T2&& val) : core_(nullptr) {
   Promise<T> p;
   p.setValue(std::forward<T2>(val));
@@ -423,22 +422,22 @@ Optional<Try<T>> Future<T>::poll() {
 }
 
 template <class T>
-inline Future<T> Future<T>::via(Executor* executor) && {
+inline Future<T> Future<T>::via(Executor* executor, int8_t priority) && {
   throwIfInvalid();
 
-  setExecutor(executor);
+  setExecutor(executor, priority);
 
   return std::move(*this);
 }
 
 template <class T>
-inline Future<T> Future<T>::via(Executor* executor) & {
+inline Future<T> Future<T>::via(Executor* executor, int8_t priority) & {
   throwIfInvalid();
 
   MoveWrapper<Promise<T>> p;
   auto f = p->getFuture();
   then([p](Try<T>&& t) mutable { p->setTry(std::move(t)); });
-  return std::move(f).via(executor);
+  return std::move(f).via(executor, priority);
 }
 
 template <class T>
@@ -527,8 +526,8 @@ inline Future<void> makeFuture(Try<void>&& t) {
 }
 
 // via
-inline Future<void> via(Executor* executor) {
-  return makeFuture().via(executor);
+Future<void> via(Executor* executor, int8_t priority) {
+  return makeFuture().via(executor, priority);
 }
 
 // mapSetCallback calls func(i, Try<T>) when every future completes
@@ -740,6 +739,53 @@ Future<T> reduce(It first, It last, T&& initial, F&& func) {
   return f;
 }
 
+template <class Collection, class F, class ItT, class Result>
+std::vector<Future<Result>>
+window(Collection input, F func, size_t n) {
+  struct WindowContext {
+    WindowContext(Collection&& i, F&& fn)
+        : i_(0), input_(std::move(i)), promises_(input_.size()),
+          func_(std::move(fn))
+      {}
+    std::atomic<size_t> i_;
+    Collection input_;
+    std::vector<Promise<Result>> promises_;
+    F func_;
+
+    static inline void spawn(const std::shared_ptr<WindowContext>& ctx) {
+      size_t i = ctx->i_++;
+      if (i < ctx->input_.size()) {
+        // Using setCallback_ directly since we don't need the Future
+        ctx->func_(std::move(ctx->input_[i])).setCallback_(
+          // ctx is captured by value
+          [ctx, i](Try<Result>&& t) {
+            ctx->promises_[i].setTry(std::move(t));
+            // Chain another future onto this one
+            spawn(std::move(ctx));
+          });
+      }
+    }
+  };
+
+  auto max = std::min(n, input.size());
+
+  auto ctx = std::make_shared<WindowContext>(
+    std::move(input), std::move(func));
+
+  for (size_t i = 0; i < max; ++i) {
+    // Start the first n Futures
+    WindowContext::spawn(ctx);
+  }
+
+  std::vector<Future<Result>> futures;
+  futures.reserve(ctx->promises_.size());
+  for (auto& promise : ctx->promises_) {
+    futures.emplace_back(promise.getFuture());
+  }
+
+  return futures;
+}
+
 template <class T>
 template <class I, class F>
 Future<I> Future<T>::reduce(I&& initial, F&& func) {
@@ -752,6 +798,54 @@ Future<I> Future<T>::reduce(I&& initial, F&& func) {
     }
     return ret;
   });
+}
+
+template <class It, class T, class F, class ItT, class Arg>
+Future<T> unorderedReduce(It first, It last, T initial, F func) {
+  if (first == last) {
+    return makeFuture(std::move(initial));
+  }
+
+  typedef isTry<Arg> IsTry;
+
+  struct UnorderedReduceContext {
+    UnorderedReduceContext(T&& memo, F&& fn, size_t n)
+        : lock_(), memo_(makeFuture<T>(std::move(memo))),
+          func_(std::move(fn)), numThens_(0), numFutures_(n), promise_()
+      {};
+    folly::MicroSpinLock lock_; // protects memo_ and numThens_
+    Future<T> memo_;
+    F func_;
+    size_t numThens_; // how many Futures completed and called .then()
+    size_t numFutures_; // how many Futures in total
+    Promise<T> promise_;
+  };
+
+  auto ctx = std::make_shared<UnorderedReduceContext>(
+    std::move(initial), std::move(func), std::distance(first, last));
+
+  mapSetCallback<ItT>(first, last, [ctx](size_t i, Try<ItT>&& t) {
+    folly::MoveWrapper<Try<ItT>> mt(std::move(t));
+    // Futures can be completed in any order, simultaneously.
+    // To make this non-blocking, we create a new Future chain in
+    // the order of completion to reduce the values.
+    // The spinlock just protects chaining a new Future, not actually
+    // executing the reduce, which should be really fast.
+    folly::MSLGuard lock(ctx->lock_);
+    ctx->memo_ = ctx->memo_.then([ctx, mt](T&& v) mutable {
+      // Either return a ItT&& or a Try<ItT>&& depending
+      // on the type of the argument of func.
+      return ctx->func_(std::move(v), mt->template get<IsTry::value, Arg&&>());
+    });
+    if (++ctx->numThens_ == ctx->numFutures_) {
+      // After reducing the value of the last Future, fulfill the Promise
+      ctx->memo_.setCallback_([ctx](Try<T>&& t2) {
+        ctx->promise_.setValue(std::move(t2));
+      });
+    }
+  });
+
+  return ctx->promise_.getFuture();
 }
 
 template <class T>
@@ -972,30 +1066,47 @@ Future<T> Future<T>::filter(F predicate) {
   });
 }
 
+template <class T>
+template <class Callback>
+auto Future<T>::thenMulti(Callback&& fn)
+    -> decltype(this->then(std::forward<Callback>(fn))) {
+  // thenMulti with one callback is just a then
+  return then(std::forward<Callback>(fn));
+}
+
+template <class T>
+template <class Callback, class... Callbacks>
+auto Future<T>::thenMulti(Callback&& fn, Callbacks&&... fns)
+    -> decltype(this->then(std::forward<Callback>(fn)).
+                      thenMulti(std::forward<Callbacks>(fns)...)) {
+  // thenMulti with two callbacks is just then(a).thenMulti(b, ...)
+  return then(std::forward<Callback>(fn)).
+         thenMulti(std::forward<Callbacks>(fns)...);
+}
+
+template <class T>
+template <class Callback, class... Callbacks>
+auto Future<T>::thenMultiWithExecutor(Executor* x, Callback&& fn,
+                                      Callbacks&&... fns)
+    -> decltype(this->then(std::forward<Callback>(fn)).
+                      thenMulti(std::forward<Callbacks>(fns)...)) {
+  // thenMultiExecutor with two callbacks is
+  // via(x).then(a).thenMulti(b, ...).via(oldX)
+  auto oldX = getExecutor();
+  setExecutor(x);
+  return then(std::forward<Callback>(fn)).
+         thenMulti(std::forward<Callbacks>(fns)...).via(oldX);
+}
+
+template <class T>
+template <class Callback>
+auto Future<T>::thenMultiWithExecutor(Executor* x, Callback&& fn)
+    -> decltype(this->then(std::forward<Callback>(fn))) {
+  // thenMulti with one callback is just a then with an executor
+  return then(x, std::forward<Callback>(fn));
+}
+
 namespace futures {
-  namespace {
-    template <class Z>
-    Future<Z> chainHelper(Future<Z> f) {
-      return f;
-    }
-
-    template <class Z, class F, class Fn, class... Callbacks>
-    Future<Z> chainHelper(F f, Fn fn, Callbacks... fns) {
-      return chainHelper<Z>(f.then(fn), fns...);
-    }
-  }
-
-  template <class A, class Z, class... Callbacks>
-  std::function<Future<Z>(Try<A>)>
-  chain(Callbacks... fns) {
-    MoveWrapper<Promise<A>> pw;
-    MoveWrapper<Future<Z>> fw(chainHelper<Z>(pw->getFuture(), fns...));
-    return [=](Try<A> t) mutable {
-      pw->setTry(std::move(t));
-      return std::move(*fw);
-    };
-  }
-
   template <class It, class F, class ItT, class Result>
   std::vector<Future<Result>> map(It first, It last, F func) {
     std::vector<Future<Result>> results;

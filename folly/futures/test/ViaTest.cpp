@@ -171,17 +171,86 @@ TEST_F(ViaFixture, viaAssignment) {
 TEST(Via, chain1) {
   EXPECT_EQ(42,
             makeFuture()
-            .then(futures::chain<void, int>([] { return 42; }))
+            .thenMulti([] { return 42; })
             .get());
 }
 
 TEST(Via, chain3) {
   int count = 0;
-  auto f = makeFuture().then(futures::chain<void, int>(
+  auto f = makeFuture().thenMulti(
       [&]{ count++; return 3.14159; },
       [&](double) { count++; return std::string("hello"); },
-      [&]{ count++; return makeFuture(42); }));
+      [&]{ count++; return makeFuture(42); });
   EXPECT_EQ(42, f.get());
+  EXPECT_EQ(3, count);
+}
+
+struct PriorityExecutor : public Executor {
+  void add(Func f) override {}
+
+  void addWithPriority(Func, int8_t priority) override {
+    int mid = getNumPriorities() / 2;
+    int p = priority < 0 ?
+            std::max(0, mid + priority) :
+            std::min(getNumPriorities() - 1, mid + priority);
+    EXPECT_LT(p, 3);
+    EXPECT_GE(p, 0);
+    if (p == 0) {
+      count0++;
+    } else if (p == 1) {
+      count1++;
+    } else if (p == 2) {
+      count2++;
+    }
+  }
+
+  uint8_t getNumPriorities() const override {
+    return 3;
+  }
+
+  int count0{0};
+  int count1{0};
+  int count2{0};
+};
+
+TEST(Via, priority) {
+  PriorityExecutor exe;
+  via(&exe, -1).then([]{});
+  via(&exe, 0).then([]{});
+  via(&exe, 1).then([]{});
+  via(&exe, 42).then([]{});  // overflow should go to max priority
+  via(&exe, -42).then([]{}); // underflow should go to min priority
+  via(&exe).then([]{});      // default to mid priority
+  via(&exe, Executor::LO_PRI).then([]{});
+  via(&exe, Executor::HI_PRI).then([]{});
+  EXPECT_EQ(3, exe.count0);
+  EXPECT_EQ(2, exe.count1);
+  EXPECT_EQ(3, exe.count2);
+}
+
+TEST_F(ViaFixture, chainX1) {
+  EXPECT_EQ(42,
+            makeFuture()
+            .thenMultiWithExecutor(eastExecutor.get(),[] { return 42; })
+            .get());
+}
+
+TEST_F(ViaFixture, chainX3) {
+  auto westThreadId = std::this_thread::get_id();
+  int count = 0;
+  auto f = via(westExecutor.get()).thenMultiWithExecutor(
+      eastExecutor.get(),
+      [&]{
+        EXPECT_NE(std::this_thread::get_id(), westThreadId);
+        count++; return 3.14159;
+      },
+      [&](double) { count++; return std::string("hello"); },
+      [&]{ count++; })
+    .then([&](){
+        EXPECT_EQ(std::this_thread::get_id(), westThreadId);
+        return makeFuture(42);
+    });
+  EXPECT_EQ(42, f.getVia(waiter.get()));
   EXPECT_EQ(3, count);
 }
 

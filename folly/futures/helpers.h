@@ -39,19 +39,6 @@ namespace futures {
   /// Futures you will pay no Timekeeper thread overhead.
   Future<void> sleep(Duration, Timekeeper* = nullptr);
 
-  /// Create a Future chain from a sequence of callbacks. i.e.
-  ///
-  ///   f.then(a).then(b).then(c);
-  ///
-  /// where f is a Future<A> and the result of the chain is a Future<Z>
-  /// becomes
-  ///
-  ///   f.then(chain<A,Z>(a, b, c));
-  // If anyone figures how to get chain to deduce A and Z, I'll buy you a drink.
-  template <class A, class Z, class... Callbacks>
-  std::function<Future<Z>(Try<A>)>
-  chain(Callbacks... fns);
-
   /**
    * Set func as the callback for each input Future and return a vector of
    * Futures containing the results in the input order.
@@ -128,10 +115,14 @@ Future<T> makeFuture(Try<T>&& t);
  * This is just syntactic sugar for makeFuture().via(executor)
  *
  * @param executor the Executor to call back on
+ * @param priority optionally, the priority to add with. Defaults to 0 which
+ * represents medium priority.
  *
  * @returns a void Future that will call back on the given executor
  */
-inline Future<void> via(Executor* executor);
+inline Future<void> via(
+    Executor* executor,
+    int8_t priority = Executor::MID_PRI);
 
 /** When all the input Futures complete, the returned Future will complete.
   Errors do not cause early termination; this Future will always succeed
@@ -220,6 +211,21 @@ auto collectN(Collection&& c, size_t n)
   return collectN(c.begin(), c.end(), n);
 }
 
+/** window creates up to n Futures using the values
+    in the collection, and then another Future for each Future
+    that completes
+
+    this is basically a sliding window of Futures of size n
+
+    func must return a Future for each value in input
+  */
+template <class Collection, class F,
+          class ItT = typename std::iterator_traits<
+            typename Collection::iterator>::value_type,
+          class Result = typename detail::resultOf<F, ItT&&>::value_type>
+std::vector<Future<Result>>
+window(Collection input, F func, size_t n);
+
 template <typename F, typename T, typename ItT>
 using MaybeTryArg = typename std::conditional<
   detail::callableWith<F, T&&, Try<ItT>&&>::value, Try<ItT>, ItT>::type;
@@ -233,6 +239,9 @@ using isFutureResult = isFuture<typename std::result_of<F(T&&, Arg&&)>::type>;
     The type of the final result is a Future of the type of the initial value.
 
     Func can either return a T, or a Future<T>
+
+    func is called in order of the input, see unorderedReduce if that is not
+    a requirement
   */
 template <class It, class T, class F>
 Future<T> reduce(It first, It last, T&& initial, F&& func);
@@ -243,6 +252,26 @@ auto reduce(Collection&& c, T&& initial, F&& func)
     -> decltype(reduce(c.begin(), c.end(), std::forward<T>(initial),
                 std::forward<F>(func))) {
   return reduce(
+      c.begin(),
+      c.end(),
+      std::forward<T>(initial),
+      std::forward<F>(func));
+}
+
+/** like reduce, but calls func on finished futures as they complete
+    does NOT keep the order of the input
+  */
+template <class It, class T, class F,
+          class ItT = typename std::iterator_traits<It>::value_type::value_type,
+          class Arg = MaybeTryArg<F, T, ItT>>
+Future<T> unorderedReduce(It first, It last, T initial, F func);
+
+/// Sugar for the most common case
+template <class Collection, class T, class F>
+auto unorderedReduce(Collection&& c, T&& initial, F&& func)
+    -> decltype(unorderedReduce(c.begin(), c.end(), std::forward<T>(initial),
+                std::forward<F>(func))) {
+  return unorderedReduce(
       c.begin(),
       c.end(),
       std::forward<T>(initial),

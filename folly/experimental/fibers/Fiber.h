@@ -24,6 +24,7 @@
 #include <folly/CPortability.h>
 #include <folly/IntrusiveList.h>
 #include <folly/experimental/fibers/BoostContextCompatibility.h>
+#include <folly/Portability.h>
 
 namespace folly { namespace fibers {
 
@@ -71,8 +72,7 @@ class Fiber {
 
   explicit Fiber(FiberManager& fiberManager);
 
-  // It is necessary to disable ASAN because init() changes the fiber's stack.
-  void init(bool recordStackUsed) FOLLY_DISABLE_ADDRESS_SANITIZER;
+  void init(bool recordStackUsed);
 
   template <typename F>
   void setFunction(F&& func);
@@ -126,11 +126,20 @@ class Fiber {
     LocalData& operator=(const LocalData& other);
 
     template <typename T>
-    T& get();
+    T& get() {
+      if (data_) {
+        assert(*dataType_ == typeid(T));
+        return *reinterpret_cast<T*>(data_);
+      }
+      return getSlow<T>();
+    }
 
     void reset();
 
     //private:
+    template <typename T>
+    FOLLY_NOINLINE T& getSlow();
+
     static void* allocateHeapBuffer(size_t size);
     static void freeHeapBuffer(void* buffer);
 

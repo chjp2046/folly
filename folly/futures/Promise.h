@@ -88,7 +88,7 @@ public:
   template <class M>
   void setValue(M&& value);
 
-  void setTry(Try<T> t);
+  void setTry(Try<T>&& t);
 
   /** Fulfill this Promise with the result of a function that takes no
     arguments and returns something implicitly convertible to T.

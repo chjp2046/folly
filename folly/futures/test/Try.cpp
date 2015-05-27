@@ -21,41 +21,54 @@
 
 using namespace folly;
 
-TEST(Try, makeTryFunction) {
+// Make sure we can copy Trys for copyable types
+TEST(Try, copy) {
+  Try<int> t;
+  auto t2 = t;
+}
+
+// But don't choke on move-only types
+TEST(Try, moveOnly) {
+  Try<std::unique_ptr<int>> t;
+  std::vector<Try<std::unique_ptr<int>>> v;
+  v.reserve(10);
+}
+
+TEST(Try, makeTryWith) {
   auto func = []() {
     return folly::make_unique<int>(1);
   };
 
-  auto result = makeTryFunction(func);
+  auto result = makeTryWith(func);
   EXPECT_TRUE(result.hasValue());
   EXPECT_EQ(*result.value(), 1);
 }
 
-TEST(Try, makeTryFunctionThrow) {
+TEST(Try, makeTryWithThrow) {
   auto func = []() {
     throw std::runtime_error("Runtime");
     return folly::make_unique<int>(1);
   };
 
-  auto result = makeTryFunction(func);
+  auto result = makeTryWith(func);
   EXPECT_TRUE(result.hasException<std::runtime_error>());
 }
 
-TEST(Try, makeTryFunctionVoid) {
+TEST(Try, makeTryWithVoid) {
   auto func = []() {
     return;
   };
 
-  auto result = makeTryFunction(func);
+  auto result = makeTryWith(func);
   EXPECT_TRUE(result.hasValue());
 }
 
-TEST(Try, makeTryFunctionVoidThrow) {
+TEST(Try, makeTryWithVoidThrow) {
   auto func = []() {
     throw std::runtime_error("Runtime");
     return;
   };
 
-  auto result = makeTryFunction(func);
+  auto result = makeTryWith(func);
   EXPECT_TRUE(result.hasException<std::runtime_error>());
 }

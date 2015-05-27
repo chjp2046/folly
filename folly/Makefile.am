@@ -83,7 +83,6 @@ nobase_follyinclude_HEADERS = \
 	experimental/fibers/ExecutionObserver.h \
 	experimental/fibers/Fiber.h \
 	experimental/fibers/Fiber-inl.h \
-	experimental/fibers/FiberIOExecutor.h \
 	experimental/fibers/FiberManager.h \
 	experimental/fibers/FiberManager-inl.h \
 	experimental/fibers/FiberManagerMap.h \
@@ -101,6 +100,7 @@ nobase_follyinclude_HEADERS = \
 	experimental/fibers/WhenN.h \
 	experimental/fibers/WhenN-inl.h \
 	experimental/FunctionScheduler.h \
+	experimental/FutureDAG.h \
 	experimental/io/FsUtil.h \
 	experimental/JSONSchema.h \
 	experimental/Select64.h \
@@ -109,6 +109,7 @@ nobase_follyinclude_HEADERS = \
 	experimental/StringKeyedUnorderedMap.h \
 	experimental/StringKeyedUnorderedSet.h \
 	experimental/TestUtil.h \
+	experimental/TupleOps.h \
 	FBString.h \
 	FBVector.h \
 	File.h \
@@ -133,6 +134,8 @@ nobase_follyinclude_HEADERS = \
 	futures/Promise.h \
 	futures/QueuedImmediateExecutor.h \
 	futures/ScheduledExecutor.h \
+	futures/SharedPromise.h \
+	futures/SharedPromise-inl.h \
 	futures/Timekeeper.h \
 	futures/Try-inl.h \
 	futures/Try.h \
@@ -287,6 +290,7 @@ nobase_follyinclude_HEADERS = \
 	wangle/concurrent/BlockingQueue.h \
 	wangle/concurrent/Codel.h \
 	wangle/concurrent/CPUThreadPoolExecutor.h \
+	wangle/concurrent/FiberIOExecutor.h \
 	wangle/concurrent/FutureExecutor.h \
 	wangle/concurrent/IOExecutor.h \
 	wangle/concurrent/IOThreadPoolExecutor.h \
@@ -333,6 +337,7 @@ libfollybase_la_SOURCES = \
 	FormatTables.cpp \
 	Malloc.cpp \
 	Range.cpp \
+	StringBase.cpp \
 	String.cpp \
 	Unicode.cpp
 

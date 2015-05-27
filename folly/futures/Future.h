@@ -55,10 +55,10 @@ class Future {
   Future& operator=(Future&&) noexcept;
 
   /// Construct a Future from a value (perfect forwarding)
-  /* implicit */
-  template <class T2 = T,
-            typename std::enable_if<!isFuture<T2>::value, void*>::type = nullptr>
-  Future(T2&& val);
+  template <class T2 = T, typename =
+            typename std::enable_if<
+              !isFuture<typename std::decay<T2>::type>::value>::type>
+  /* implicit */ Future(T2&& val);
 
   template <class T2 = T,
             typename std::enable_if<
@@ -97,12 +97,16 @@ class Future {
   // The ref-qualifier allows for `this` to be moved out so we
   // don't get access-after-free situations in chaining.
   // https://akrzemi1.wordpress.com/2014/06/02/ref-qualifiers/
-  inline Future<T> via(Executor* executor) &&;
+  inline Future<T> via(
+      Executor* executor,
+      int8_t priority = Executor::MID_PRI) &&;
 
   /// This variant creates a new future, where the ref-qualifier && version
   /// moves `this` out. This one is less efficient but avoids confusing users
   /// when "return f.via(x);" fails.
-  inline Future<T> via(Executor* executor) &;
+  inline Future<T> via(
+      Executor* executor,
+      int8_t priority = Executor::MID_PRI) &;
 
   /** True when the result (or exception) is ready. */
   bool isReady() const;
@@ -376,6 +380,42 @@ class Future {
   template <class I, class F>
   Future<I> reduce(I&& initial, F&& func);
 
+  /// Create a Future chain from a sequence of callbacks. i.e.
+  ///
+  ///   f.then(a).then(b).then(c)
+  ///
+  /// where f is a Future<A> and the result of the chain is a Future<D>
+  /// becomes
+  ///
+  ///   f.thenMulti(a, b, c);
+  template <class Callback, class... Callbacks>
+  auto thenMulti(Callback&& fn, Callbacks&&... fns)
+    -> decltype(this->then(std::forward<Callback>(fn)).
+                      thenMulti(std::forward<Callbacks>(fns)...));
+
+  // Nothing to see here, just thenMulti's base case
+  template <class Callback>
+  auto thenMulti(Callback&& fn)
+    -> decltype(this->then(std::forward<Callback>(fn)));
+
+  /// Create a Future chain from a sequence of callbacks. i.e.
+  ///
+  ///   f.via(executor).then(a).then(b).then(c).via(oldExecutor)
+  ///
+  /// where f is a Future<A> and the result of the chain is a Future<D>
+  /// becomes
+  ///
+  ///   f.thenMultiWithExecutor(executor, a, b, c);
+  template <class Callback, class... Callbacks>
+  auto thenMultiWithExecutor(Executor* x, Callback&& fn, Callbacks&&... fns)
+    -> decltype(this->then(std::forward<Callback>(fn)).
+                      thenMulti(std::forward<Callbacks>(fns)...));
+
+  // Nothing to see here, just thenMultiWithExecutor's base case
+  template <class Callback>
+  auto thenMultiWithExecutor(Executor* x, Callback&& fn)
+    -> decltype(this->then(std::forward<Callback>(fn)));
+
  protected:
   typedef detail::Core<T>* corePtr;
 
@@ -405,7 +445,9 @@ class Future {
   thenImplementation(F func, detail::argResult<isTry, F, Args...>);
 
   Executor* getExecutor() { return core_->getExecutor(); }
-  void setExecutor(Executor* x) { core_->setExecutor(x); }
+  void setExecutor(Executor* x, int8_t priority = Executor::MID_PRI) {
+    core_->setExecutor(x, priority);
+  }
 };
 
 } // folly
