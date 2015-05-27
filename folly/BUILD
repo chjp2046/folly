@@ -12,7 +12,8 @@ cc_library(
 		'Unicode.cpp',
 		#'detail/Clock.cpp',
 		'detail/MallocImpl.cpp',
-		#'detail/FunctionalExcept.cpp'
+		#'detail/FunctionalExcept.cpp',
+        'StringBase.cpp'
 	],
 	deps = [
 		'//thirdparty/glog:glog',
