@@ -116,6 +116,7 @@ Future<T>::thenImplementation(F func, detail::argResult<isTry, F, Args...>) {
 
   // wrap these so we can move them into the lambda
   folly::MoveWrapper<Promise<B>> p;
+  p->setInterruptHandler(core_->getInterruptHandler());
   folly::MoveWrapper<F> funcm(std::forward<F>(func));
 
   // grab the Future now before we lose our handle on the Promise
@@ -687,7 +688,7 @@ collectN(InputIterator first, InputIterator last, size_t n) {
   };
   auto ctx = std::make_shared<CollectNContext>();
 
-  if (std::distance(first, last) < n) {
+  if (size_t(std::distance(first, last)) < n) {
     ctx->p.setException(std::runtime_error("Not enough futures"));
   } else {
     // for each completed Future, increase count and add to vector, until we
@@ -886,7 +887,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
     }
   });
 
-  return ctx->promise.getFuture();
+  return ctx->promise.getFuture().via(getExecutor());
 }
 
 template <class T>

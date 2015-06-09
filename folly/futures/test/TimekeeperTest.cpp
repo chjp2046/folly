@@ -160,6 +160,31 @@ TEST(Timekeeper, interruptDoesntCrash) {
   f.cancel();
 }
 
+TEST(Timekeeper, chainedInterruptTest) {
+  bool test = false;
+  auto f = futures::sleep(Duration(100)).then([&](){
+    test = true;
+  });
+  f.cancel();
+  f.wait();
+  EXPECT_FALSE(test);
+}
+
+TEST(Timekeeper, executor) {
+  class ExecutorTester : public Executor {
+   public:
+    void add(Func f) override {
+      count++;
+      f();
+    }
+    std::atomic<int> count{0};
+  };
+
+  auto f = makeFuture();
+  ExecutorTester tester;
+  f.via(&tester).within(std::chrono::milliseconds(1)).then([&](){}).wait();
+  EXPECT_EQ(2, tester.count);
+}
 // TODO(5921764)
 /*
 TEST(Timekeeper, onTimeoutPropagates) {

@@ -59,6 +59,7 @@ nobase_follyinclude_HEADERS = \
 	detail/SpinLockImpl.h \
 	detail/Stats.h \
 	detail/ThreadLocalDetail.h \
+	detail/TurnSequencer.h \
 	detail/UncaughtExceptionCounter.h \
 	Demangle.h \
 	DiscriminatedPtr.h \
@@ -103,6 +104,7 @@ nobase_follyinclude_HEADERS = \
 	experimental/FutureDAG.h \
 	experimental/io/FsUtil.h \
 	experimental/JSONSchema.h \
+	experimental/LockFreeRingBuffer.h \
 	experimental/Select64.h \
 	experimental/SharedMutex.h \
 	experimental/StringKeyedCommon.h \

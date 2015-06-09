@@ -52,6 +52,9 @@ const char* testCert = "folly/io/async/test/certs/tests-cert.pem";
 const char* testKey = "folly/io/async/test/certs/tests-key.pem";
 const char* testCA = "folly/io/async/test/certs/ca-cert.pem";
 
+constexpr size_t SSLClient::kMaxReadBufferSz;
+constexpr size_t SSLClient::kMaxReadsPerEvent;
+
 TestSSLServer::TestSSLServer(SSLServerAcceptCallbackBase *acb) :
 ctx_(new folly::SSLContext),
     acb_(acb),
@@ -495,6 +498,41 @@ TEST(AsyncSSLSocketTest, SNITestNotMatch) {
 
   EXPECT_TRUE(!client.serverNameMatch);
   EXPECT_TRUE(!server.serverNameMatch);
+}
+/**
+ * 1. Client sends TLSEXT_HOSTNAME in client hello.
+ * 2. We then change the serverName.
+ * 3. We expect that we get 'false' as the result for serNameMatch.
+ */
+
+TEST(AsyncSSLSocketTest, SNITestChangeServerName) {
+   EventBase eventBase;
+  std::shared_ptr<SSLContext> clientCtx(new SSLContext);
+  std::shared_ptr<SSLContext> dfServerCtx(new SSLContext);
+  // Use the same SSLContext to continue the handshake after
+  // tlsext_hostname match.
+  std::shared_ptr<SSLContext> hskServerCtx(dfServerCtx);
+  const std::string serverName("xyz.newdev.facebook.com");
+  int fds[2];
+  getfds(fds);
+  getctx(clientCtx, dfServerCtx);
+
+  AsyncSSLSocket::UniquePtr clientSock(
+    new AsyncSSLSocket(clientCtx, &eventBase, fds[0], serverName));
+  //Change the server name
+  std::string newName("new.com");
+  clientSock->setServerName(newName);
+  AsyncSSLSocket::UniquePtr serverSock(
+    new AsyncSSLSocket(dfServerCtx, &eventBase, fds[1], true));
+  SNIClient client(std::move(clientSock));
+  SNIServer server(std::move(serverSock),
+                   dfServerCtx,
+                   hskServerCtx,
+                   serverName);
+
+  eventBase.loop();
+
+  EXPECT_TRUE(!client.serverNameMatch);
 }
 
 /**
