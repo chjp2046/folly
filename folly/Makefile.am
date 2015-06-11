@@ -91,7 +91,6 @@ nobase_follyinclude_HEADERS = \
 	experimental/fibers/ForEach-inl.h \
 	experimental/fibers/GenericBaton.h \
 	experimental/fibers/GuardPageAllocator.h \
-	experimental/fibers/GuardPageAllocator-inl.h \
 	experimental/fibers/LoopController.h \
 	experimental/fibers/Promise.h \
 	experimental/fibers/Promise-inl.h \
@@ -282,6 +281,7 @@ nobase_follyinclude_HEADERS = \
 	wangle/bootstrap/ClientBootstrap.h \
 	wangle/channel/AsyncSocketHandler.h \
 	wangle/channel/EventBaseHandler.h \
+	wangle/channel/FileRegion.h \
 	wangle/channel/Handler.h \
 	wangle/channel/HandlerContext.h \
 	wangle/channel/HandlerContext-inl.h \
@@ -399,6 +399,7 @@ libfolly_la_SOURCES = \
 	experimental/fibers/Fiber.cpp \
 	experimental/fibers/FiberManager.cpp \
 	experimental/fibers/FiberManagerMap.cpp \
+	experimental/fibers/GuardPageAllocator.cpp \
 	experimental/fibers/TimeoutController.cpp \
 	experimental/FunctionScheduler.cpp \
 	experimental/io/FsUtil.cpp \

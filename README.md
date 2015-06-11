@@ -1,4 +1,4 @@
-Folly: Facebook Open-source LibrarY
+Folly: Facebook Open-source Library
 -----------------------------------
 
 Folly is an open-source C++ library developed and used at Facebook.
@@ -84,16 +84,16 @@ of by the bootstrap script.)
 Other Linux distributions
 -------------------------
 
-- double-conversion (https://github.com/floitsch/double-conversion/)
+- double-conversion (https://github.com/google/double-conversion)
 
   Download and build double-conversion.
   You may need to tell configure where to find it.
 
   [double-conversion/] `ln -s src double-conversion`
 
-  [folly/] `./configure LDFLAGS=-L$DOUBLE_CONVERISON_HOME/ CPPFLAGS=-I$DOUBLE_CONVERISON_HOME/`
+  [folly/] `./configure LDFLAGS=-L$DOUBLE_CONVERSION_HOME/ CPPFLAGS=-I$DOUBLE_CONVERSION_HOME/`
 
-  [folly/] `LD_LIBRARY_PATH=$DOUBLE_CONVERISON_HOME/ make`
+  [folly/] `LD_LIBRARY_PATH=$DOUBLE_CONVERSION_HOME/ make`
 
 - additional platform specific dependencies:
 
