@@ -28,6 +28,7 @@ nobase_follyinclude_HEADERS = \
 	AtomicHashMap-inl.h \
 	AtomicLinkedList.h \
 	AtomicStruct.h \
+	AtomicUnorderedMap.h \
 	Baton.h \
 	Benchmark.h \
 	Bits.h \
@@ -39,6 +40,7 @@ nobase_follyinclude_HEADERS = \
 	CpuId.h \
 	CPortability.h \
 	detail/AtomicHashUtils.h \
+	detail/AtomicUnorderedMapUtils.h \
 	detail/BitIteratorDetail.h \
 	detail/BitsDetail.h \
 	detail/CacheLocality.h \
@@ -75,6 +77,7 @@ nobase_follyinclude_HEADERS = \
 	experimental/ExecutionObserver.h \
 	experimental/EliasFanoCoding.h \
 	experimental/EventCount.h \
+	experimental/Instructions.h \
 	experimental/fibers/AddTasks.h \
 	experimental/fibers/AddTasks-inl.h \
 	experimental/fibers/Baton.h \
@@ -95,6 +98,8 @@ nobase_follyinclude_HEADERS = \
 	experimental/fibers/Promise.h \
 	experimental/fibers/Promise-inl.h \
 	experimental/fibers/SimpleLoopController.h \
+	experimental/fibers/TimedMutex.h \
+	experimental/fibers/TimedMutex-inl.h \
 	experimental/fibers/TimeoutController.h \
 	experimental/fibers/traits.h \
 	experimental/fibers/WhenN.h \
@@ -105,7 +110,6 @@ nobase_follyinclude_HEADERS = \
 	experimental/JSONSchema.h \
 	experimental/LockFreeRingBuffer.h \
 	experimental/Select64.h \
-	experimental/SharedMutex.h \
 	experimental/StringKeyedCommon.h \
 	experimental/StringKeyedUnorderedMap.h \
 	experimental/StringKeyedUnorderedSet.h \
@@ -229,6 +233,7 @@ nobase_follyinclude_HEADERS = \
 	Range.h \
 	RWSpinLock.h \
 	ScopeGuard.h \
+	SharedMutex.h \
 	Singleton.h \
 	Singleton-inl.h \
 	SmallLocks.h \
@@ -295,6 +300,7 @@ nobase_follyinclude_HEADERS = \
 	wangle/concurrent/FiberIOExecutor.h \
 	wangle/concurrent/FutureExecutor.h \
 	wangle/concurrent/IOExecutor.h \
+	wangle/concurrent/IOObjectCache.h \
 	wangle/concurrent/IOThreadPoolExecutor.h \
 	wangle/concurrent/GlobalExecutor.h \
 	wangle/concurrent/LifoSemMPMCQueue.h \
@@ -320,15 +326,15 @@ nobase_follyinclude_HEADERS = \
 	wangle/ssl/TLSTicketKeySeeds.h
 
 FormatTables.cpp: build/generate_format_tables.py
-	build/generate_format_tables.py
+	$(PYTHON) build/generate_format_tables.py
 CLEANFILES += FormatTables.cpp
 
 EscapeTables.cpp: build/generate_escape_tables.py
-	build/generate_escape_tables.py
+	$(PYTHON) build/generate_escape_tables.py
 CLEANFILES += EscapeTables.cpp
 
 GroupVarintTables.cpp: build/generate_varint_tables.py
-	build/generate_varint_tables.py
+	$(PYTHON) build/generate_varint_tables.py
 CLEANFILES += GroupVarintTables.cpp
 
 libfollybase_la_SOURCES = \
@@ -385,8 +391,9 @@ libfolly_la_SOURCES = \
 	MemoryMapping.cpp \
 	Random.cpp \
 	SafeAssert.cpp \
-	SocketAddress.cpp \
+	SharedMutex.cpp \
 	Singleton.cpp \
+	SocketAddress.cpp \
 	SpookyHashV1.cpp \
 	SpookyHashV2.cpp \
 	stats/Instantiations.cpp \
@@ -405,7 +412,6 @@ libfolly_la_SOURCES = \
 	experimental/io/FsUtil.cpp \
 	experimental/JSONSchema.cpp \
 	experimental/Select64.cpp \
-	experimental/SharedMutex.cpp \
 	experimental/TestUtil.cpp \
 	wangle/acceptor/Acceptor.cpp \
 	wangle/acceptor/ConnectionManager.cpp \
@@ -433,7 +439,6 @@ libfolly_la_SOURCES += \
 endif
 
 if !HAVE_LINUX
-nobase_follyinclude_HEADERS += detail/Clock.h
 libfollybase_la_SOURCES += detail/Clock.cpp
 endif
 

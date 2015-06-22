@@ -20,6 +20,7 @@
 #include <folly/Benchmark.h>
 #include <folly/futures/Future.h>
 #include <folly/futures/Promise.h>
+#include <folly/futures/InlineExecutor.h>
 
 #include <semaphore.h>
 #include <vector>
@@ -46,7 +47,6 @@ BENCHMARK(constantFuture) {
   makeFuture(42);
 }
 
-// This shouldn't get too far below 100%
 BENCHMARK_RELATIVE(promiseAndFuture) {
   Promise<int> p;
   Future<int> f = p.getFuture();
@@ -54,7 +54,6 @@ BENCHMARK_RELATIVE(promiseAndFuture) {
   f.value();
 }
 
-// The higher the better. At the time of writing, it's only about 40% :(
 BENCHMARK_RELATIVE(withThen) {
   Promise<int> p;
   Future<int> f = p.getFuture().then(incr<int>);
@@ -290,6 +289,98 @@ BENCHMARK_RELATIVE(throwWrappedAndCatchContended) {
 
 BENCHMARK_RELATIVE(throwWrappedAndCatchWrappedContended) {
   contend(throwWrappedAndCatchWrappedImpl);
+}
+
+InlineExecutor exe;
+
+template <class T>
+Future<T> fGen() {
+  Promise<T> p;
+  auto f = p.getFuture()
+    .then([] (T&& t) {
+      return std::move(t);
+    })
+    .then([] (T&& t) {
+      return makeFuture(std::move(t));
+    })
+    .via(&exe)
+    .then([] (T&& t) {
+      return std::move(t);
+    })
+    .then([] (T&& t) {
+      return makeFuture(std::move(t));
+    });
+  p.setValue(T());
+  return f;
+}
+
+template <class T>
+std::vector<Future<T>> fsGen() {
+  std::vector<Future<T>> fs;
+  for (auto i = 0; i < 10; i++) {
+    fs.push_back(fGen<T>());
+  }
+  return fs;
+}
+
+template <class T>
+void complexBenchmark() {
+  collect(fsGen<T>());
+  collectAll(fsGen<T>());
+  collectAny(fsGen<T>());
+  futures::map(fsGen<T>(), [] (const T& t) {
+    return t;
+  });
+  futures::map(fsGen<T>(), [] (const T& t) {
+    return makeFuture(T(t));
+  });
+}
+
+BENCHMARK_DRAW_LINE();
+
+template <size_t S>
+struct Blob {
+  char buf[S];
+};
+
+BENCHMARK(complexUnit) {
+  complexBenchmark<Unit>();
+}
+
+BENCHMARK_RELATIVE(complexBlob4) {
+  complexBenchmark<Blob<4>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob8) {
+  complexBenchmark<Blob<8>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob64) {
+  complexBenchmark<Blob<64>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob128) {
+  complexBenchmark<Blob<128>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob256) {
+  complexBenchmark<Blob<256>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob512) {
+  complexBenchmark<Blob<512>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob1024) {
+  complexBenchmark<Blob<1024>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob2048) {
+  complexBenchmark<Blob<2048>>();
+}
+
+BENCHMARK_RELATIVE(complexBlob4096) {
+  complexBenchmark<Blob<4096>>();
 }
 
 int main(int argc, char** argv) {

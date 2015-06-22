@@ -26,7 +26,7 @@ namespace folly { namespace wangle {
 template <class Context>
 class HandlerBase {
  public:
-  virtual ~HandlerBase() {}
+  virtual ~HandlerBase() = default;
 
   virtual void attachPipeline(Context* ctx) {}
   virtual void detachPipeline(Context* ctx) {}
@@ -55,7 +55,7 @@ class Handler : public HandlerBase<HandlerContext<Rout, Wout>> {
   typedef Win win;
   typedef Wout wout;
   typedef HandlerContext<Rout, Wout> Context;
-  virtual ~Handler() {}
+  virtual ~Handler() = default;
 
   virtual void read(Context* ctx, Rin msg) = 0;
   virtual void readEOF(Context* ctx) {
@@ -109,10 +109,10 @@ class InboundHandler : public HandlerBase<InboundHandlerContext<Rout>> {
 
   typedef Rin rin;
   typedef Rout rout;
-  typedef Nothing win;
-  typedef Nothing wout;
+  typedef Unit win;
+  typedef Unit wout;
   typedef InboundHandlerContext<Rout> Context;
-  virtual ~InboundHandler() {}
+  virtual ~InboundHandler() = default;
 
   virtual void read(Context* ctx, Rin msg) = 0;
   virtual void readEOF(Context* ctx) {
@@ -134,12 +134,12 @@ class OutboundHandler : public HandlerBase<OutboundHandlerContext<Wout>> {
  public:
   static const HandlerDir dir = HandlerDir::OUT;
 
-  typedef Nothing rin;
-  typedef Nothing rout;
+  typedef Unit rin;
+  typedef Unit rout;
   typedef Win win;
   typedef Wout wout;
   typedef OutboundHandlerContext<Wout> Context;
-  virtual ~OutboundHandler() {}
+  virtual ~OutboundHandler() = default;
 
   virtual Future<void> write(Context* ctx, Win msg) = 0;
   virtual Future<void> close(Context* ctx) {

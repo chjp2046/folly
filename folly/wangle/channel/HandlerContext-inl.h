@@ -20,7 +20,7 @@ namespace folly { namespace wangle {
 
 class PipelineContext {
  public:
-  virtual ~PipelineContext() {}
+  virtual ~PipelineContext() = default;
 
   virtual void attachPipeline() = 0;
   virtual void detachPipeline() = 0;
@@ -36,12 +36,14 @@ class PipelineContext {
 
   virtual void setNextIn(PipelineContext* ctx) = 0;
   virtual void setNextOut(PipelineContext* ctx) = 0;
+
+  virtual HandlerDir getDirection() = 0;
 };
 
 template <class In>
 class InboundLink {
  public:
-  virtual ~InboundLink() {}
+  virtual ~InboundLink() = default;
   virtual void read(In msg) = 0;
   virtual void readEOF() = 0;
   virtual void readException(exception_wrapper e) = 0;
@@ -52,7 +54,7 @@ class InboundLink {
 template <class Out>
 class OutboundLink {
  public:
-  virtual ~OutboundLink() {}
+  virtual ~OutboundLink() = default;
   virtual Future<void> write(Out msg) = 0;
   virtual Future<void> close() = 0;
 };
@@ -60,7 +62,7 @@ class OutboundLink {
 template <class P, class H, class Context>
 class ContextImplBase : public PipelineContext {
  public:
-  ~ContextImplBase() {}
+  ~ContextImplBase() = default;
 
   H* getHandler() {
     return handler_.get();
@@ -86,6 +88,10 @@ class ContextImplBase : public PipelineContext {
   }
 
   void setNextIn(PipelineContext* ctx) override {
+    if (!ctx) {
+      nextIn_ = nullptr;
+      return;
+    }
     auto nextIn = dynamic_cast<InboundLink<typename H::rout>*>(ctx);
     if (nextIn) {
       nextIn_ = nextIn;
@@ -95,12 +101,20 @@ class ContextImplBase : public PipelineContext {
   }
 
   void setNextOut(PipelineContext* ctx) override {
+    if (!ctx) {
+      nextOut_ = nullptr;
+      return;
+    }
     auto nextOut = dynamic_cast<OutboundLink<typename H::wout>*>(ctx);
     if (nextOut) {
       nextOut_ = nextOut;
     } else {
       throw std::invalid_argument("outbound type mismatch");
     }
+  }
+
+  HandlerDir getDirection() override {
+    return H::dir;
   }
 
  protected:
@@ -140,7 +154,7 @@ class ContextImpl
     this->impl_ = this;
   }
 
-  ~ContextImpl() {}
+  ~ContextImpl() = default;
 
   // HandlerContext overrides
   void fireRead(Rout msg) override {
@@ -289,7 +303,7 @@ class InboundContextImpl
     this->impl_ = this;
   }
 
-  ~InboundContextImpl() {}
+  ~InboundContextImpl() = default;
 
   // InboundHandlerContext overrides
   void fireRead(Rout msg) override {
@@ -389,7 +403,7 @@ class OutboundContextImpl
     this->impl_ = this;
   }
 
-  ~OutboundContextImpl() {}
+  ~OutboundContextImpl() = default;
 
   // OutboundHandlerContext overrides
   Future<void> fireWrite(Wout msg) override {

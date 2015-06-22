@@ -59,7 +59,7 @@ Optional<SchemaError> makeError(Args&&... args) {
 struct ValidationContext;
 
 struct IValidator {
-  virtual ~IValidator() {}
+  virtual ~IValidator() = default;
 
  private:
   friend struct ValidationContext;
@@ -102,7 +102,7 @@ struct SchemaValidatorContext final {
  * Root validator for a schema.
  */
 struct SchemaValidator final : IValidator, public Validator {
-  SchemaValidator() {}
+  SchemaValidator() = default;
   void loadSchema(SchemaValidatorContext& context, const dynamic& schema);
 
   Optional<SchemaError> validate(ValidationContext&,
@@ -381,8 +381,8 @@ struct PropertiesValidator final : IValidator {
       for (const auto& pair : patternProperties->items()) {
         if (pair.first.isString()) {
           patternPropertyValidators_.emplace_back(
-              make_pair(boost::regex(pair.first.getString().toStdString()),
-                        SchemaValidator::make(context, pair.second)));
+              boost::regex(pair.first.getString().toStdString()),
+              SchemaValidator::make(context, pair.second));
         }
       }
     }
@@ -466,9 +466,8 @@ struct DependencyValidator final : IValidator {
         propertyDep_.emplace_back(std::move(p));
       }
       if (pair.second.isObject()) {
-        schemaDep_.emplace_back(
-            make_pair(pair.first.getString(),
-                      SchemaValidator::make(context, pair.second)));
+        schemaDep_.emplace_back(pair.first.getString(),
+                                SchemaValidator::make(context, pair.second));
       }
     }
   }
@@ -1011,7 +1010,7 @@ folly::Singleton<Validator> schemaValidator([]() {
 });
 }
 
-Validator::~Validator() {}
+Validator::~Validator() = default;
 
 std::unique_ptr<Validator> makeValidator(const dynamic& schema) {
   auto v = make_unique<SchemaValidator>();

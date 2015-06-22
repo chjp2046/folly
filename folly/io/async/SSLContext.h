@@ -42,7 +42,7 @@ namespace folly {
  */
 class PasswordCollector {
  public:
-  virtual ~PasswordCollector() {}
+  virtual ~PasswordCollector() = default;
   /**
    * Interface for customizing how to collect private key password.
    *
@@ -81,6 +81,8 @@ class SSLContext {
   };
 
   struct NextProtocolsItem {
+    NextProtocolsItem(int wt, const std::list<std::string>& ptcls):
+      weight(wt), protocols(ptcls) {}
     int weight;
     std::list<std::string> protocols;
   };

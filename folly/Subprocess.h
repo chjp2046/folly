@@ -208,7 +208,7 @@ class SubprocessError : public std::exception {};
 class CalledProcessError : public SubprocessError {
  public:
   explicit CalledProcessError(ProcessReturnCode rc);
-  ~CalledProcessError() throw() { }
+  ~CalledProcessError() throw() = default;
   const char* what() const throw() FOLLY_OVERRIDE { return what_.c_str(); }
   ProcessReturnCode returnCode() const { return returnCode_; }
  private:
@@ -222,7 +222,7 @@ class CalledProcessError : public SubprocessError {
 class SubprocessSpawnError : public SubprocessError {
  public:
   SubprocessSpawnError(const char* executable, int errCode, int errnoValue);
-  ~SubprocessSpawnError() throw() {}
+  ~SubprocessSpawnError() throw() = default;
   const char* what() const throw() FOLLY_OVERRIDE { return what_.c_str(); }
   int errnoValue() const { return errnoValue_; }
 
@@ -714,6 +714,7 @@ class Subprocess {
    * No, you may NOT call this from a communicate() callback.
    */
   struct ChildPipe {
+    ChildPipe(int fd, folly::File&& ppe) : childFd(fd), pipe(std::move(ppe)) {}
     int childFd;
     folly::File pipe;  // Owns the parent FD
   };

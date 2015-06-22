@@ -148,7 +148,7 @@ class AsyncSocket::BytesWriteRequest : public AsyncSocket::WriteRequest {
   }
 
   // private destructor, to ensure callers use destroy()
-  virtual ~BytesWriteRequest() {}
+  virtual ~BytesWriteRequest() = default;
 
   const struct iovec* getOps() const {
     assert(opCount_ > opIndex_);
@@ -525,6 +525,12 @@ void AsyncSocket::setReadCB(ReadCallback *callback) {
   // eventBase_->isInEventBaseThread() when eventBase_ is nullptr.
   if (callback == readCallback_) {
     return;
+  }
+
+  /* We are removing a read callback */
+  if (callback == nullptr &&
+      immediateReadHandler_.isLoopCallbackScheduled()) {
+    immediateReadHandler_.cancelLoopCallback();
   }
 
   if (shutdownFlags_ & SHUT_READ) {
@@ -1330,9 +1336,11 @@ void AsyncSocket::handleRead() noexcept {
       return;
     }
     if (maxReadsPerEvent_ && (++numReads >= maxReadsPerEvent_)) {
-      // We might still have data in the socket.
-      // (e.g. see comment in AsyncSSLSocket::checkForImmediateRead)
-      scheduleImmediateRead();
+      if (readCallback_ != nullptr) {
+        // We might still have data in the socket.
+        // (e.g. see comment in AsyncSSLSocket::checkForImmediateRead)
+        scheduleImmediateRead();
+      }
       return;
     }
   }

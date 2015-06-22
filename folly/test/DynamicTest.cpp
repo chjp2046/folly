@@ -52,17 +52,15 @@ TEST(Dynamic, ObjectBasics) {
   EXPECT_EQ(*newObject.keys().begin(), newObject.items().begin()->first);
   EXPECT_EQ(*newObject.values().begin(), newObject.items().begin()->second);
   std::vector<std::pair<folly::fbstring, dynamic>> found;
-  found.push_back(std::make_pair(
-     newObject.keys().begin()->asString(),
-     *newObject.values().begin()));
+  found.emplace_back(newObject.keys().begin()->asString(),
+                     *newObject.values().begin());
 
   EXPECT_EQ(*boost::next(newObject.keys().begin()),
             boost::next(newObject.items().begin())->first);
   EXPECT_EQ(*boost::next(newObject.values().begin()),
             boost::next(newObject.items().begin())->second);
-  found.push_back(std::make_pair(
-      boost::next(newObject.keys().begin())->asString(),
-      *boost::next(newObject.values().begin())));
+  found.emplace_back(boost::next(newObject.keys().begin())->asString(),
+                     *boost::next(newObject.values().begin()));
 
   std::sort(found.begin(), found.end());
 
@@ -159,6 +157,7 @@ TEST(Dynamic, ArrayBasics) {
   EXPECT_EQ(array.at(1), 2);
   EXPECT_EQ(array.at(2), 3);
 
+  EXPECT_ANY_THROW(array.at(-1));
   EXPECT_ANY_THROW(array.at(3));
 
   array.push_back("foo");
@@ -283,6 +282,29 @@ TEST(Dynamic, GetPtr) {
   EXPECT_EQ(dynamic(11), *object.get_ptr("one"));
   const dynamic& cobject = object;
   EXPECT_EQ(dynamic(2), *cobject.get_ptr("two"));
+}
+
+TEST(Dynamic, Assignment) {
+  const dynamic ds[] = { { 1, 2, 3 },
+                         dynamic::object("a", true),
+                         24,
+                         26.5,
+                         true,
+                         "hello", };
+  const dynamic dd[] = { { 5, 6 },
+                         dynamic::object("t", "T")(1, 7),
+                         9000,
+                         3.14159,
+                         false,
+                         "world", };
+  for (const auto& source : ds) {
+    for (const auto& dest : dd) {
+      dynamic tmp(dest);
+      EXPECT_EQ(tmp, dest);
+      tmp = source;
+      EXPECT_EQ(tmp, source);
+    }
+  }
 }
 
 int main(int argc, char** argv) {

@@ -52,7 +52,7 @@ TypeError::TypeError(const std::string& expected,
       '\''))
 {}
 
-TypeError::~TypeError() {}
+TypeError::~TypeError() = default;
 
 // This is a higher-order preprocessor macro to aid going from runtime
 // types to the compile time type system.
@@ -100,22 +100,34 @@ bool dynamic::operator==(dynamic const& o) const {
 
 dynamic& dynamic::operator=(dynamic const& o) {
   if (&o != this) {
-    destroy();
-#define FB_X(T) new (getAddress<T>()) T(*o.getAddress<T>())
-    FB_DYNAMIC_APPLY(o.type_, FB_X);
+    if (type_ == o.type_) {
+#define FB_X(T) *getAddress<T>() = *o.getAddress<T>()
+      FB_DYNAMIC_APPLY(type_, FB_X);
 #undef FB_X
-    type_ = o.type_;
+    } else {
+      destroy();
+#define FB_X(T) new (getAddress<T>()) T(*o.getAddress<T>())
+      FB_DYNAMIC_APPLY(o.type_, FB_X);
+#undef FB_X
+      type_ = o.type_;
+    }
   }
   return *this;
 }
 
 dynamic& dynamic::operator=(dynamic&& o) noexcept {
   if (&o != this) {
-    destroy();
-#define FB_X(T) new (getAddress<T>()) T(std::move(*o.getAddress<T>()))
-    FB_DYNAMIC_APPLY(o.type_, FB_X);
+    if (type_ == o.type_) {
+#define FB_X(T) *getAddress<T>() = std::move(*o.getAddress<T>())
+      FB_DYNAMIC_APPLY(type_, FB_X);
 #undef FB_X
-    type_ = o.type_;
+    } else {
+      destroy();
+#define FB_X(T) new (getAddress<T>()) T(std::move(*o.getAddress<T>()))
+      FB_DYNAMIC_APPLY(o.type_, FB_X);
+#undef FB_X
+      type_ = o.type_;
+    }
   }
   return *this;
 }
@@ -173,7 +185,7 @@ dynamic const& dynamic::at(dynamic const& idx) const {
     if (!idx.isInt()) {
       throw TypeError("int64", idx.type());
     }
-    if (idx >= parray->size()) {
+    if (idx < 0 || idx >= parray->size()) {
       throw std::out_of_range("out of range in dynamic array");
     }
     return (*parray)[idx.asInt()];

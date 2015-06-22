@@ -18,15 +18,18 @@
 #include <cassert>
 
 #include <folly/CPortability.h>
+#include <folly/Memory.h>
+#include <folly/Optional.h>
+#include <folly/Portability.h>
+#include <folly/ScopeGuard.h>
+#ifdef __APPLE__
+#include <folly/ThreadLocal.h>
+#endif
 #include <folly/experimental/fibers/Baton.h>
 #include <folly/experimental/fibers/Fiber.h>
 #include <folly/experimental/fibers/LoopController.h>
 #include <folly/experimental/fibers/Promise.h>
 #include <folly/futures/Try.h>
-#include <folly/Memory.h>
-#include <folly/Optional.h>
-#include <folly/Portability.h>
-#include <folly/ScopeGuard.h>
 
 namespace folly { namespace fibers {
 
@@ -454,8 +457,13 @@ T& FiberManager::local() {
 
 template <typename T>
 T& FiberManager::localThread() {
+#ifndef __APPLE__
   static thread_local T t;
   return t;
+#else // osx doesn't support thread_local
+  static ThreadLocal<T> t;
+  return *t;
+#endif
 }
 
 inline void FiberManager::initLocalData(Fiber& fiber) {

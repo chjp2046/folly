@@ -291,6 +291,7 @@ TEST(Via, then2Variadic) {
   EXPECT_TRUE(f.a);
 }
 
+#ifndef __APPLE__ // TODO #7372389
 /// Simple executor that does work in another thread
 class ThreadExecutor : public Executor {
   folly::MPMCQueue<Func> funcs;
@@ -338,6 +339,34 @@ TEST(Via, viaThenGetWasRacy) {
   ASSERT_TRUE(!!val);
   EXPECT_EQ(42, *val);
 }
+
+TEST(Via, callbackRace) {
+  ThreadExecutor x;
+
+  auto fn = [&x]{
+    auto promises = std::make_shared<std::vector<Promise<void>>>(4);
+    std::vector<Future<void>> futures;
+
+    for (auto& p : *promises) {
+      futures.emplace_back(
+        p.getFuture()
+        .via(&x)
+        .then([](Try<void>&&){}));
+    }
+
+    x.waitForStartup();
+    x.add([promises]{
+      for (auto& p : *promises) {
+        p.setValue();
+      }
+    });
+
+    return collectAll(futures);
+  };
+
+  fn().wait();
+}
+#endif
 
 class DummyDrivableExecutor : public DrivableExecutor {
  public:
@@ -415,29 +444,51 @@ TEST(Via, viaRaces) {
   t2.join();
 }
 
-TEST(Future, callbackRace) {
-  ThreadExecutor x;
+TEST(ViaFunc, liftsVoid) {
+  ManualExecutor x;
+  int count = 0;
+  Future<void> f = via(&x, [&]{ count++; });
 
-  auto fn = [&x]{
-    auto promises = std::make_shared<std::vector<Promise<void>>>(4);
-    std::vector<Future<void>> futures;
+  EXPECT_EQ(0, count);
+  x.run();
+  EXPECT_EQ(1, count);
+}
 
-    for (auto& p : *promises) {
-      futures.emplace_back(
-        p.getFuture()
-        .via(&x)
-        .then([](Try<void>&&){}));
-    }
+TEST(ViaFunc, value) {
+  ManualExecutor x;
+  EXPECT_EQ(42, via(&x, []{ return 42; }).getVia(&x));
+}
 
-    x.waitForStartup();
-    x.add([promises]{
-      for (auto& p : *promises) {
-        p.setValue();
-      }
-    });
+TEST(ViaFunc, exception) {
+  ManualExecutor x;
+  EXPECT_THROW(
+    via(&x, []() -> int { throw std::runtime_error("expected"); })
+      .getVia(&x),
+    std::runtime_error);
+}
 
-    return collectAll(futures);
-  };
+TEST(ViaFunc, future) {
+  ManualExecutor x;
+  EXPECT_EQ(42, via(&x, []{ return makeFuture(42); })
+            .getVia(&x));
+}
 
-  fn().wait();
+TEST(ViaFunc, voidFuture) {
+  ManualExecutor x;
+  int count = 0;
+  via(&x, [&]{ count++; }).getVia(&x);
+  EXPECT_EQ(1, count);
+}
+
+TEST(ViaFunc, isSticky) {
+  ManualExecutor x;
+  int count = 0;
+
+  auto f = via(&x, [&]{ count++; });
+  x.run();
+
+  f.then([&]{ count++; });
+  EXPECT_EQ(1, count);
+  x.run();
+  EXPECT_EQ(2, count);
 }

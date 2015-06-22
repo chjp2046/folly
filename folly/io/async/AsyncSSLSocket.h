@@ -83,7 +83,7 @@ class AsyncSSLSocket : public virtual AsyncSocket {
 
   class HandshakeCB {
    public:
-    virtual ~HandshakeCB() {}
+    virtual ~HandshakeCB() = default;
 
     /**
      * handshakeVer() is invoked during handshaking to give the
@@ -686,10 +686,15 @@ class AsyncSSLSocket : public virtual AsyncSocket {
   // AsyncSocket calls this at the wrong time for SSL
   void handleInitialReadWrite() noexcept override {}
 
+  int interpretSSLError(int rc, int error);
   ssize_t performRead(void* buf, size_t buflen) override;
   ssize_t performWrite(const iovec* vec, uint32_t count, WriteFlags flags,
                        uint32_t* countWritten, uint32_t* partialWritten)
     override;
+
+  ssize_t performWriteIovec(const iovec* vec, uint32_t count,
+                            WriteFlags flags, uint32_t* countWritten,
+                            uint32_t* partialWritten);
 
   // This virtual wrapper around SSL_write exists solely for testing/mockability
   virtual int sslWriteImpl(SSL *ssl, const void *buf, int n) {
