@@ -62,7 +62,7 @@ class Future {
 
   template <class T2 = T, typename =
             typename std::enable_if<
-              folly::is_void_or_unit<T2>::value>::type>
+              std::is_same<Unit, T2>::value>::type>
   Future();
 
   ~Future();
@@ -165,10 +165,6 @@ class Future {
     value(), which may rethrow if this has captured an exception. If func
     throws, the exception will be captured in the Future that is returned.
     */
-  /* TODO n3428 and other async frameworks have something like then(scheduler,
-     Future), we might want to support a similar API which could be
-     implemented a little more efficiently than
-     f.via(executor).then(callback) */
   template <typename F, typename R = detail::callableResult<T, F>>
   typename R::Return then(F func) {
     typedef typename R::Arg Arguments;
@@ -206,9 +202,9 @@ class Future {
     -> decltype(this->then(std::forward<Arg>(arg),
                            std::forward<Args>(args)...));
 
-  /// Convenience method for ignoring the value and creating a Future<void>.
+  /// Convenience method for ignoring the value and creating a Future<Unit>.
   /// Exceptions still propagate.
-  Future<void> then();
+  Future<Unit> then();
 
   /// Set an error callback for this Future. The callback should take a single
   /// argument of the type that you want to catch, and should return a value of

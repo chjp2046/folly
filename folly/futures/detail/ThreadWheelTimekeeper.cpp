@@ -32,13 +32,13 @@ namespace {
       return new WTCallback(base);
     }
 
-    Future<void> getFuture() {
+    Future<Unit> getFuture() {
       return promise_.getFuture();
     }
 
    protected:
     EventBase* base_;
-    Promise<void> promise_;
+    Promise<Unit> promise_;
 
     explicit WTCallback(EventBase* base)
         : base_(base) {
@@ -76,12 +76,12 @@ ThreadWheelTimekeeper::ThreadWheelTimekeeper() :
 ThreadWheelTimekeeper::~ThreadWheelTimekeeper() {
   eventBase_.runInEventBaseThreadAndWait([this]{
     wheelTimer_->cancelAll();
+    eventBase_.terminateLoopSoon();
   });
-  eventBase_.terminateLoopSoon();
   thread_.join();
 }
 
-Future<void> ThreadWheelTimekeeper::after(Duration dur) {
+Future<Unit> ThreadWheelTimekeeper::after(Duration dur) {
   auto cob = WTCallback::create(&eventBase_);
   auto f = cob->getFuture();
   eventBase_.runInEventBaseThread([=]{

@@ -31,13 +31,13 @@ class ThreadWheelTimekeeper : public Timekeeper {
  public:
   /// But it doesn't *have* to be a singleton.
   ThreadWheelTimekeeper();
-  ~ThreadWheelTimekeeper();
+  ~ThreadWheelTimekeeper() override;
 
   /// Implement the Timekeeper interface
   /// This future *does* complete on the timer thread. You should almost
   /// certainly follow it with a via() call or the accuracy of other timers
   /// will suffer.
-  Future<void> after(Duration) override;
+  Future<Unit> after(Duration) override;
 
  protected:
   folly::EventBase eventBase_;

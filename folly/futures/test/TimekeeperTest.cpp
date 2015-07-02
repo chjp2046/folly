@@ -52,8 +52,9 @@ TEST_F(TimekeeperFixture, after) {
 
 TEST(Timekeeper, futureGet) {
   Promise<int> p;
-  std::thread([&]{ p.setValue(42); }).detach();
+  auto t = std::thread([&]{ p.setValue(42); });
   EXPECT_EQ(42, p.getFuture().get());
+  t.join();
 }
 
 TEST(Timekeeper, futureGetBeforeTimeout) {
@@ -122,7 +123,7 @@ TEST(Timekeeper, futureWithinVoidSpecialization) {
 }
 
 TEST(Timekeeper, futureWithinException) {
-  Promise<void> p;
+  Promise<Unit> p;
   auto f = p.getFuture().within(awhile, std::runtime_error("expected"));
   EXPECT_THROW(f.get(), std::runtime_error);
 }
@@ -149,7 +150,7 @@ TEST(Timekeeper, onTimeoutVoid) {
      });
   makeFuture().delayed(one_ms)
     .onTimeout(Duration(0), [&]{
-       return makeFuture<void>(std::runtime_error("expected"));
+       return makeFuture<Unit>(std::runtime_error("expected"));
      });
   // just testing compilation here
 }

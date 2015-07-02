@@ -67,18 +67,59 @@ In the folly directory, run
   sudo make install
 ```
 
-OS X
+OS X (Homebrew)
 ----
-There is a bootstrap script if you use Homebrew (http://brew.sh/). At the time
-of writing (OS X Yosemite 10.10.1) the default compiler (clang) has some
-issues building, but gcc 4.9.2 from Homebrew works fine. (This is taken care
-of by the bootstrap script.)
+folly is available as a Formula and releases may be built via `brew install folly`.
+
+You may also use `folly/bootstrap-osx-homebrew.sh` to build against `master`:
 
 ```
   cd folly
   ./bootstrap-osx-homebrew.sh
   make
   make check
+```
+
+OS X (MacPorts)
+----
+Install the required packages from MacPorts:
+
+```
+  sudo port install \
+    autoconf \
+    automake \
+    boost \
+    gflags \
+    git \
+    google-glog \
+    libevent \
+    libtool \
+    lz4 \
+    lzma \
+    scons \
+    snappy \
+    zlib
+```
+
+Download and install double-conversion:
+
+```
+  git clone https://github.com/google/double-conversion.git
+  cd double-conversion
+  cmake -DBUILD_SHARED_LIBS=ON .
+  make
+  sudo make install
+```
+
+Download and install folly with the parameters listed below:
+
+```
+  git clone https://github.com/facebook/folly.git
+  cd folly/folly
+  autoreconf -ivf
+  ./configure CPPFLAGS="-I/opt/local/include" LDFLAGS="-L/opt/local/lib"
+  make
+  sudo make install
 ```
 
 Other Linux distributions

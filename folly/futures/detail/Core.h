@@ -78,7 +78,7 @@ class Core {
   /// This must be heap-constructed. There's probably a way to enforce that in
   /// code but since this is just internal detail code and I don't know how
   /// off-hand, I'm punting.
-  Core() {}
+  Core() : result_(), fsm_(State::Start), attached_(2) {}
 
   explicit Core(Try<T>&& t)
     : result_(std::move(t)),
@@ -313,8 +313,6 @@ class Core {
   }
 
   void doCallback() {
-    RequestContext::setContext(context_);
-
     Executor* x = executor_;
     int8_t priority;
     if (x) {
@@ -333,19 +331,24 @@ class Core {
         if (LIKELY(x->getNumPriorities() == 1)) {
           x->add([this]() mutable {
             SCOPE_EXIT { detachOne(); };
+            RequestContext::setContext(context_);
             callback_(std::move(*result_));
           });
         } else {
           x->addWithPriority([this]() mutable {
             SCOPE_EXIT { detachOne(); };
+            RequestContext::setContext(context_);
             callback_(std::move(*result_));
           }, priority);
         }
       } catch (...) {
+        --attached_; // Account for extra ++attached_ before try
+        RequestContext::setContext(context_);
         result_ = Try<T>(exception_wrapper(std::current_exception()));
         callback_(std::move(*result_));
       }
     } else {
+      RequestContext::setContext(context_);
       callback_(std::move(*result_));
     }
   }
@@ -364,10 +367,10 @@ class Core {
   char lambdaBuf_[lambdaBufSize];
   // place result_ next to increase the likelihood that the value will be
   // contained entirely in one cache line
-  folly::Optional<Try<T>> result_ {};
+  folly::Optional<Try<T>> result_;
   std::function<void(Try<T>&&)> callback_ {nullptr};
-  FSM<State> fsm_ {State::Start};
-  std::atomic<unsigned char> attached_ {2};
+  FSM<State> fsm_;
+  std::atomic<unsigned char> attached_;
   std::atomic<bool> active_ {true};
   std::atomic<bool> interruptHandlerSet_ {false};
   folly::MicroSpinLock interruptLock_ {0};
@@ -414,7 +417,7 @@ struct CollectVariadicContext {
   }
   Promise<std::tuple<Ts...>> p;
   std::tuple<Ts...> results;
-  std::atomic<bool> threw;
+  std::atomic<bool> threw {false};
   typedef Future<std::tuple<Ts...>> type;
 };
 

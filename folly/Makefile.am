@@ -74,6 +74,7 @@ nobase_follyinclude_HEADERS = \
 	EvictingCacheMap.h \
 	experimental/AutoTimer.h \
 	experimental/Bits.h \
+	experimental/BitVectorCoding.h \
 	experimental/ExecutionObserver.h \
 	experimental/EliasFanoCoding.h \
 	experimental/EventCount.h \
@@ -123,6 +124,7 @@ nobase_follyinclude_HEADERS = \
 	folly-config.h \
 	Foreach.h \
 	FormatArg.h \
+	FormatTraits.h \
 	Format.h \
 	Format-inl.h \
 	futures/Deprecated.h \
@@ -307,11 +309,11 @@ nobase_follyinclude_HEADERS = \
 	wangle/concurrent/NamedThreadFactory.h \
 	wangle/concurrent/ThreadFactory.h \
 	wangle/concurrent/ThreadPoolExecutor.h \
-	wangle/rx/Observable.h \
-	wangle/rx/Observer.h \
-	wangle/rx/Subject.h \
-	wangle/rx/Subscription.h \
-	wangle/rx/types.h \
+	wangle/deprecated/rx/Observable.h \
+	wangle/deprecated/rx/Observer.h \
+	wangle/deprecated/rx/Subject.h \
+	wangle/deprecated/rx/Subscription.h \
+	wangle/deprecated/rx/types.h \
 	wangle/ssl/ClientHelloExtStats.h \
 	wangle/ssl/DHParam.h \
 	wangle/ssl/PasswordInFile.h \
@@ -420,6 +422,7 @@ libfolly_la_SOURCES = \
 	wangle/acceptor/SocketOptions.cpp \
 	wangle/acceptor/TransportInfo.cpp \
 	wangle/bootstrap/ServerBootstrap.cpp \
+	wangle/channel/Pipeline.cpp \
 	wangle/concurrent/CPUThreadPoolExecutor.cpp \
 	wangle/concurrent/Codel.cpp \
 	wangle/concurrent/IOThreadPoolExecutor.cpp \

@@ -38,7 +38,7 @@ struct FileRegionTest : public Test {
     EXPECT_EQ(0, unlink(path));
   }
 
-  ~FileRegionTest() {
+  ~FileRegionTest() override {
     // Close up shop
     close(fd);
     acceptedSocket->close();
@@ -89,7 +89,7 @@ TEST_F(FileRegionTest, Repeated) {
   int sendCount = 1000;
 
   FileRegion fileRegion(fd, 0, count);
-  std::vector<Future<void>> fs;
+  std::vector<Future<Unit>> fs;
   for (int i = 0; i < sendCount; i++) {
     fs.push_back(fileRegion.transferTo(socket));
   }

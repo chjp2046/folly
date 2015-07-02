@@ -51,7 +51,7 @@ Future<T>::Future(T2&& val)
 template <class T>
 template <typename, typename>
 Future<T>::Future()
-  : core_(new detail::Core<T>(Try<T>())) {}
+  : core_(new detail::Core<T>(Try<T>(T()))) {}
 
 template <class T>
 Future<T>::~Future() {
@@ -226,7 +226,7 @@ auto Future<T>::then(Executor* x, Arg&& arg, Args&&... args)
 }
 
 template <class T>
-Future<void> Future<T>::then() {
+Future<Unit> Future<T>::then() {
   return then([] () {});
 }
 
@@ -432,8 +432,6 @@ inline Future<T> Future<T>::via(Executor* executor, int8_t priority) & {
 template <class Func>
 auto via(Executor* x, Func func)
   -> Future<typename isFuture<decltype(func())>::Inner>
-// this would work, if not for Future<void> :-/
-// -> decltype(via(x).then(func))
 {
   // TODO make this actually more performant. :-P #7260175
   return via(x).then(func);
@@ -468,24 +466,17 @@ Future<typename std::decay<T>::type> makeFuture(T&& t) {
 }
 
 inline // for multiple translation units
-Future<void> makeFuture() {
-  return makeFuture(Try<void>());
+Future<Unit> makeFuture() {
+  return makeFuture(Unit{});
 }
 
 template <class F>
-auto makeFutureWith(
-    F&& func,
-    typename std::enable_if<!std::is_reference<F>::value, bool>::type sdf)
-    -> Future<decltype(func())> {
-  return makeFuture(makeTryWith([&func]() {
-    return (func)();
+auto makeFutureWith(F&& func)
+    -> Future<typename Unit::Lift<decltype(func())>::type> {
+  using LiftedResult = typename Unit::Lift<decltype(func())>::type;
+  return makeFuture<LiftedResult>(makeTryWith([&func]() mutable {
+    return func();
   }));
-}
-
-template <class F>
-auto makeFutureWith(F const& func) -> Future<decltype(func())> {
-  F copy = func;
-  return makeFuture(makeTryWith(std::move(copy)));
 }
 
 template <class T>
@@ -511,7 +502,7 @@ Future<T> makeFuture(Try<T>&& t) {
 }
 
 // via
-Future<void> via(Executor* executor, int8_t priority) {
+Future<Unit> via(Executor* executor, int8_t priority) {
   return makeFuture().via(executor, priority);
 }
 
@@ -600,16 +591,8 @@ struct CollectContext {
   }
   Promise<Result> p;
   InternalResult result;
-  std::atomic<bool> threw;
+  std::atomic<bool> threw {false};
 };
-
-// Specialize for void (implementations in Future.cpp)
-
-template <>
-CollectContext<void>::~CollectContext();
-
-template <>
-void CollectContext<void>::setPartialResult(size_t i, Try<void>& t);
 
 }
 
@@ -660,12 +643,12 @@ collectAny(InputIterator first, InputIterator last) {
     typename std::iterator_traits<InputIterator>::value_type::value_type T;
 
   struct CollectAnyContext {
-    CollectAnyContext(size_t n) : done(false) {};
+    CollectAnyContext() {};
     Promise<std::pair<size_t, Try<T>>> p;
-    std::atomic<bool> done;
+    std::atomic<bool> done {false};
   };
 
-  auto ctx = std::make_shared<CollectAnyContext>(std::distance(first, last));
+  auto ctx = std::make_shared<CollectAnyContext>();
   mapSetCallback<T>(first, last, [ctx](size_t i, Try<T>&& t) {
     if (!ctx->done.exchange(true)) {
       ctx->p.setValue(std::make_pair(i, std::move(t)));
@@ -752,10 +735,10 @@ std::vector<Future<Result>>
 window(Collection input, F func, size_t n) {
   struct WindowContext {
     WindowContext(Collection&& i, F&& fn)
-        : i_(0), input_(std::move(i)), promises_(input_.size()),
+        : input_(std::move(i)), promises_(input_.size()),
           func_(std::move(fn))
       {}
-    std::atomic<size_t> i_;
+    std::atomic<size_t> i_ {0};
     Collection input_;
     std::vector<Promise<Result>> promises_;
     F func_;
@@ -872,10 +855,10 @@ template <class E>
 Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
 
   struct Context {
-    Context(E ex) : exception(std::move(ex)), promise(), token(false) {}
+    Context(E ex) : exception(std::move(ex)), promise() {}
     E exception;
     Promise<T> promise;
-    std::atomic<bool> token;
+    std::atomic<bool> token {false};
   };
   auto ctx = std::make_shared<Context>(std::move(e));
 
@@ -884,7 +867,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
   }
 
   tk->after(dur)
-    .then([ctx](Try<void> const& t) {
+    .then([ctx](Try<Unit> const& t) {
       if (ctx->token.exchange(true) == false) {
         if (t.hasException()) {
           ctx->promise.setException(std::move(t.exception()));
@@ -908,7 +891,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
 template <class T>
 Future<T> Future<T>::delayed(Duration dur, Timekeeper* tk) {
   return collectAll(*this, futures::sleep(dur, tk))
-    .then([](std::tuple<Try<T>, Try<void>> tup) {
+    .then([](std::tuple<Try<T>, Try<Unit>> tup) {
       Try<T>& t = std::get<0>(tup);
       return makeFuture<T>(std::move(t));
     });
@@ -1007,11 +990,6 @@ T Future<T>::get() {
   return std::move(wait().value());
 }
 
-template <>
-inline void Future<void>::get() {
-  wait().value();
-}
-
 template <class T>
 T Future<T>::get(Duration dur) {
   wait(dur);
@@ -1022,24 +1000,9 @@ T Future<T>::get(Duration dur) {
   }
 }
 
-template <>
-inline void Future<void>::get(Duration dur) {
-  wait(dur);
-  if (isReady()) {
-    return;
-  } else {
-    throw TimedOut();
-  }
-}
-
 template <class T>
 T Future<T>::getVia(DrivableExecutor* e) {
   return std::move(waitVia(e).value());
-}
-
-template <>
-inline void Future<void>::getVia(DrivableExecutor* e) {
-  waitVia(e).value();
 }
 
 namespace detail {
@@ -1047,13 +1010,6 @@ namespace detail {
   struct TryEquals {
     static bool equals(const Try<T>& t1, const Try<T>& t2) {
       return t1.value() == t2.value();
-    }
-  };
-
-  template <>
-  struct TryEquals<void> {
-    static bool equals(const Try<void>& t1, const Try<void>& t2) {
-      return true;
     }
   };
 }
@@ -1134,7 +1090,7 @@ namespace futures {
 }
 
 // Instantiate the most common Future types to save compile time
-extern template class Future<void>;
+extern template class Future<Unit>;
 extern template class Future<bool>;
 extern template class Future<int>;
 extern template class Future<int64_t>;
@@ -1142,8 +1098,3 @@ extern template class Future<std::string>;
 extern template class Future<double>;
 
 } // namespace folly
-
-// I haven't included a Future<T&> specialization because I don't forsee us
-// using it, however it is not difficult to add when needed. Refer to
-// Future<void> for guidance. std::future and boost::future code would also be
-// instructive.

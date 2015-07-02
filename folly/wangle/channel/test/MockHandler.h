@@ -29,13 +29,6 @@ class MockHandler : public Handler<Rin, Rout, Win, Wout> {
   MockHandler() = default;
   MockHandler(MockHandler&&) = default;
 
-#ifdef __clang__
-# pragma clang diagnostic push
-# if __clang_major__ > 3 || __clang_minor__ >= 6
-#  pragma clang diagnostic ignored "-Winconsistent-missing-override"
-# endif
-#endif
-
   MOCK_METHOD2_T(read_, void(Context*, Rin&));
   MOCK_METHOD1_T(readEOF, void(Context*));
   MOCK_METHOD2_T(readException, void(Context*, exception_wrapper));
@@ -48,21 +41,17 @@ class MockHandler : public Handler<Rin, Rout, Win, Wout> {
   MOCK_METHOD1_T(detachPipeline, void(Context*));
   MOCK_METHOD1_T(detachTransport, void(Context*));
 
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
   void read(Context* ctx, Rin msg) override {
     read_(ctx, msg);
   }
 
-  Future<void> write(Context* ctx, Win msg) override {
+  Future<Unit> write(Context* ctx, Win msg) override {
     return makeFutureWith([&](){
       write_(ctx, msg);
     });
   }
 
-  Future<void> close(Context* ctx) override {
+  Future<Unit> close(Context* ctx) override {
     return makeFutureWith([&](){
       close_(ctx);
     });

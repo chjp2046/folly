@@ -56,7 +56,7 @@ struct ViaFixture : public testing::Test {
       });
   }
 
-  ~ViaFixture() {
+  ~ViaFixture() override {
     done = true;
     eastExecutor->add([=]() { });
     t.join();
@@ -72,7 +72,7 @@ struct ViaFixture : public testing::Test {
   std::shared_ptr<ManualExecutor> eastExecutor;
   std::shared_ptr<ManualWaiter> waiter;
   InlineExecutor inlineExecutor;
-  bool done;
+  std::atomic<bool> done;
   std::thread t;
 };
 
@@ -124,7 +124,7 @@ TEST(Via, thenFunction) {
 
 TEST_F(ViaFixture, threadHops) {
   auto westThreadId = std::this_thread::get_id();
-  auto f = via(eastExecutor.get()).then([=](Try<void>&& t) {
+  auto f = via(eastExecutor.get()).then([=](Try<Unit>&& t) {
     EXPECT_NE(std::this_thread::get_id(), westThreadId);
     return makeFuture<int>(1);
   }).via(westExecutor.get()
@@ -191,7 +191,7 @@ TEST(Via, chain3) {
 struct PriorityExecutor : public Executor {
   void add(Func f) override {}
 
-  void addWithPriority(Func, int8_t priority) override {
+  void addWithPriority(Func f, int8_t priority) override {
     int mid = getNumPriorities() / 2;
     int p = priority < 0 ?
             std::max(0, mid + priority) :
@@ -205,6 +205,7 @@ struct PriorityExecutor : public Executor {
     } else if (p == 2) {
       count2++;
     }
+    f();
   }
 
   uint8_t getNumPriorities() const override {
@@ -282,7 +283,7 @@ TEST(Via, then2) {
 }
 
 TEST(Via, then2Variadic) {
-  struct Foo { bool a = false; void foo(Try<void>) { a = true; } };
+  struct Foo { bool a = false; void foo(Try<Unit>) { a = true; } };
   Foo f;
   ManualExecutor x;
   makeFuture().then(&x, &Foo::foo, &f);
@@ -316,7 +317,7 @@ class ThreadExecutor : public Executor {
     worker = std::thread(std::bind(&ThreadExecutor::work, this));
   }
 
-  ~ThreadExecutor() {
+  ~ThreadExecutor() override {
     done = true;
     funcs.write([]{});
     worker.join();
@@ -344,14 +345,14 @@ TEST(Via, callbackRace) {
   ThreadExecutor x;
 
   auto fn = [&x]{
-    auto promises = std::make_shared<std::vector<Promise<void>>>(4);
-    std::vector<Future<void>> futures;
+    auto promises = std::make_shared<std::vector<Promise<Unit>>>(4);
+    std::vector<Future<Unit>> futures;
 
     for (auto& p : *promises) {
       futures.emplace_back(
         p.getFuture()
         .via(&x)
-        .then([](Try<void>&&){}));
+        .then([](Try<Unit>&&){}));
     }
 
     x.waitForStartup();
@@ -423,16 +424,16 @@ TEST(Via, waitVia) {
 
 TEST(Via, viaRaces) {
   ManualExecutor x;
-  Promise<void> p;
+  Promise<Unit> p;
   auto tid = std::this_thread::get_id();
   bool done = false;
 
   std::thread t1([&] {
     p.getFuture()
       .via(&x)
-      .then([&](Try<void>&&) { EXPECT_EQ(tid, std::this_thread::get_id()); })
-      .then([&](Try<void>&&) { EXPECT_EQ(tid, std::this_thread::get_id()); })
-      .then([&](Try<void>&&) { done = true; });
+      .then([&](Try<Unit>&&) { EXPECT_EQ(tid, std::this_thread::get_id()); })
+      .then([&](Try<Unit>&&) { EXPECT_EQ(tid, std::this_thread::get_id()); })
+      .then([&](Try<Unit>&&) { done = true; });
   });
 
   std::thread t2([&] {
@@ -447,7 +448,7 @@ TEST(Via, viaRaces) {
 TEST(ViaFunc, liftsVoid) {
   ManualExecutor x;
   int count = 0;
-  Future<void> f = via(&x, [&]{ count++; });
+  Future<Unit> f = via(&x, [&]{ count++; });
 
   EXPECT_EQ(0, count);
   x.run();

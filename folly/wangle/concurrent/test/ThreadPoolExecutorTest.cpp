@@ -255,17 +255,17 @@ static void futureExecutor() {
       EXPECT_EQ(100, t.value());
     });
   fe.addFuture([] () { return makeFuture(); }).then(
-    [&] (Try<void>&& t) {
+    [&] (Try<Unit>&& t) {
       c++;
       EXPECT_NO_THROW(t.value());
     });
   fe.addFuture([] () { return; }).then(
-    [&] (Try<void>&& t) {
+    [&] (Try<Unit>&& t) {
       c++;
       EXPECT_NO_THROW(t.value());
     });
   fe.addFuture([] () { throw std::runtime_error("oops"); }).then(
-    [&] (Try<void>&& t) {
+    [&] (Try<Unit>&& t) {
       c++;
       EXPECT_THROW(t.value(), std::runtime_error);
     });
@@ -322,16 +322,12 @@ TEST(ThreadPoolExecutorTest, PriorityPreemptionTest) {
 
 class TestObserver : public ThreadPoolExecutor::Observer {
  public:
-  void threadStarted(ThreadPoolExecutor::ThreadHandle*) {
+  void threadStarted(ThreadPoolExecutor::ThreadHandle*) override { threads_++; }
+  void threadStopped(ThreadPoolExecutor::ThreadHandle*) override { threads_--; }
+  void threadPreviouslyStarted(ThreadPoolExecutor::ThreadHandle*) override {
     threads_++;
   }
-  void threadStopped(ThreadPoolExecutor::ThreadHandle*) {
-    threads_--;
-  }
-  void threadPreviouslyStarted(ThreadPoolExecutor::ThreadHandle*) {
-    threads_++;
-  }
-  void threadNotYetStopped(ThreadPoolExecutor::ThreadHandle*) {
+  void threadNotYetStopped(ThreadPoolExecutor::ThreadHandle*) override {
     threads_--;
   }
   void checkCalls() {
