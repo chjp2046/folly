@@ -82,6 +82,8 @@ struct MaxAlign { char c; } __attribute__((__aligned__));
 // deprecated
 #if defined(__clang__) || defined(__GNUC__)
 # define FOLLY_DEPRECATED(msg) __attribute__((__deprecated__(msg)))
+#elif defined(_MSC_VER)
+# define FOLLY_DEPRECATED(msg) __declspec(deprecated(msg))
 #else
 # define FOLLY_DEPRECATED
 #endif
@@ -158,6 +160,9 @@ struct MaxAlign { char c; } __attribute__((__aligned__));
  * are supported in gcc 4.7 but not gcc 4.6. */
 #if !defined(FOLLY_FINAL) && !defined(FOLLY_OVERRIDE)
 # if defined(__clang__) || __GNUC_PREREQ(4, 7)
+#  define FOLLY_FINAL final
+#  define FOLLY_OVERRIDE override
+# elif defined(_MSC_VER) && _MSC_VER >= 1600
 #  define FOLLY_FINAL final
 #  define FOLLY_OVERRIDE override
 # else
@@ -258,6 +263,40 @@ typedef SSIZE_T ssize_t;
 // compiler specific to compiler specific
 // nolint
 # define __PRETTY_FUNCTION__ __FUNCSIG__
+
+// Hide a GCC specific thing that breaks MSVC if left alone.
+# define __extension__
+
+#ifdef _M_IX86_FP
+# define FOLLY_SSE _M_IX86_FP
+# define FOLLY_SSE_MINOR 0
+#endif
+
+#endif
+
+#ifndef FOLLY_SSE
+# if defined(__SSE4_2__)
+#  define FOLLY_SSE 4
+#  define FOLLY_SSE_MINOR 2
+# elif defined(__SSE4_1__)
+#  define FOLLY_SSE 4
+#  define FOLLY_SSE_MINOR 1
+# elif defined(__SSE4__)
+#  define FOLLY_SSE 4
+#  define FOLLY_SSE_MINOR 0
+# elif defined(__SSE3__)
+#  define FOLLY_SSE 3
+#  define FOLLY_SSE_MINOR 0
+# elif defined(__SSE2__)
+#  define FOLLY_SSE 2
+#  define FOLLY_SSE_MINOR 0
+# elif defined(__SSE__)
+#  define FOLLY_SSE 1
+#  define FOLLY_SSE_MINOR 0
+# else
+#  define FOLLY_SSE 0
+#  define FOLLY_SSE_MINOR 0
+# endif
 #endif
 
 #if FOLLY_UNUSUAL_GFLAGS_NAMESPACE
@@ -280,21 +319,30 @@ inline size_t malloc_usable_size(void* ptr) {
 #endif
 
 // RTTI may not be enabled for this compilation unit.
-#if defined(__GXX_RTTI) || defined(__cpp_rtti)
+#if defined(__GXX_RTTI) || defined(__cpp_rtti) || \
+    (defined(_MSC_VER) && defined(_CPPRTTI))
 # define FOLLY_HAS_RTTI 1
+#endif
+
+#ifdef _MSC_VER
+# include <intrin.h>
 #endif
 
 namespace folly {
 
 inline void asm_volatile_pause() {
-#if defined(__i386__) || FOLLY_X64
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+  ::_mm_pause();
+#elif defined(__i386__) || FOLLY_X64
   asm volatile ("pause");
 #elif FOLLY_A64
   asm volatile ("wfe");
 #endif
 }
 inline void asm_pause() {
-#if defined(__i386__) || FOLLY_X64
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+  ::_mm_pause();
+#elif defined(__i386__) || FOLLY_X64
   asm ("pause");
 #elif FOLLY_A64
   asm ("wfe");

@@ -57,6 +57,7 @@ nobase_follyinclude_HEADERS = \
 	detail/Malloc.h \
 	detail/MemoryIdler.h \
 	detail/MPMCPipelineDetail.h \
+	detail/Sleeper.h \
 	detail/SlowFingerprint.h \
 	detail/SpinLockImpl.h \
 	detail/Stats.h \
@@ -110,6 +111,8 @@ nobase_follyinclude_HEADERS = \
 	experimental/io/FsUtil.h \
 	experimental/JSONSchema.h \
 	experimental/LockFreeRingBuffer.h \
+	experimental/NestedCommandLineApp.h \
+	experimental/ProgramOptions.h \
 	experimental/Select64.h \
 	experimental/StringKeyedCommon.h \
 	experimental/StringKeyedUnorderedMap.h \
@@ -127,7 +130,9 @@ nobase_follyinclude_HEADERS = \
 	FormatTraits.h \
 	Format.h \
 	Format-inl.h \
+	futures/Barrier.h \
 	futures/Deprecated.h \
+	futures/ThreadedExecutor.h \
 	futures/DrivableExecutor.h \
 	futures/Future-pre.h \
 	futures/helpers.h \
@@ -191,6 +196,7 @@ nobase_follyinclude_HEADERS = \
 	io/async/AsyncSocketBase.h \
 	io/async/AsyncSSLSocket.h \
 	io/async/AsyncSocketException.h \
+	io/async/DelayedDestructionBase.h \
 	io/async/DelayedDestruction.h \
 	io/async/EventBase.h \
 	io/async/EventBaseManager.h \
@@ -201,6 +207,7 @@ nobase_follyinclude_HEADERS = \
 	io/async/HHWheelTimer.h \
 	io/async/Request.h \
 	io/async/SSLContext.h \
+	io/async/ScopedEventBaseThread.h \
 	io/async/TimeoutManager.h \
 	io/async/test/AsyncSSLSocketTest.h \
 	io/async/test/BlockingSocket.h \
@@ -208,6 +215,7 @@ nobase_follyinclude_HEADERS = \
 	io/async/test/MockAsyncServerSocket.h \
 	io/async/test/MockAsyncSSLSocket.h \
 	io/async/test/MockAsyncTransport.h \
+	io/async/test/SocketPair.h \
 	io/async/test/TimeUtil.h \
 	io/async/test/UndelayedDestruction.h \
 	io/async/test/Util.h \
@@ -221,12 +229,14 @@ nobase_follyinclude_HEADERS = \
 	MapUtil.h \
 	Memory.h \
 	MemoryMapping.h \
+	MicroSpinLock.h \
 	MoveWrapper.h \
 	MPMCPipeline.h \
 	MPMCQueue.h \
 	Optional.h \
 	PackedSyncPtr.h \
 	Padded.h \
+	PicoSpinLock.h \
 	Portability.h \
 	Preprocessor.h \
 	ProducerConsumerQueue.h \
@@ -271,61 +281,7 @@ nobase_follyinclude_HEADERS = \
 	Uri.h \
 	Uri-inl.h \
 	Varint.h \
-	VersionCheck.h \
-	wangle/acceptor/Acceptor.h \
-	wangle/acceptor/ConnectionCounter.h \
-	wangle/acceptor/ConnectionManager.h \
-	wangle/acceptor/DomainNameMisc.h \
-	wangle/acceptor/LoadShedConfiguration.h \
-	wangle/acceptor/ManagedConnection.h \
-	wangle/acceptor/NetworkAddress.h \
-	wangle/acceptor/ServerSocketConfig.h \
-	wangle/acceptor/SocketOptions.h \
-	wangle/acceptor/TransportInfo.h \
-	wangle/bootstrap/ServerBootstrap.h \
-	wangle/bootstrap/ServerBootstrap-inl.h \
-	wangle/bootstrap/ServerSocketFactory.h \
-	wangle/bootstrap/ClientBootstrap.h \
-	wangle/channel/AsyncSocketHandler.h \
-	wangle/channel/EventBaseHandler.h \
-	wangle/channel/FileRegion.h \
-	wangle/channel/Handler.h \
-	wangle/channel/HandlerContext.h \
-	wangle/channel/HandlerContext-inl.h \
-	wangle/channel/OutputBufferingHandler.h \
-	wangle/channel/Pipeline.h \
-	wangle/channel/Pipeline-inl.h \
-	wangle/channel/StaticPipeline.h \
-	wangle/concurrent/BlockingQueue.h \
-	wangle/concurrent/Codel.h \
-	wangle/concurrent/CPUThreadPoolExecutor.h \
-	wangle/concurrent/FiberIOExecutor.h \
-	wangle/concurrent/FutureExecutor.h \
-	wangle/concurrent/IOExecutor.h \
-	wangle/concurrent/IOObjectCache.h \
-	wangle/concurrent/IOThreadPoolExecutor.h \
-	wangle/concurrent/GlobalExecutor.h \
-	wangle/concurrent/LifoSemMPMCQueue.h \
-	wangle/concurrent/NamedThreadFactory.h \
-	wangle/concurrent/ThreadFactory.h \
-	wangle/concurrent/ThreadPoolExecutor.h \
-	wangle/deprecated/rx/Observable.h \
-	wangle/deprecated/rx/Observer.h \
-	wangle/deprecated/rx/Subject.h \
-	wangle/deprecated/rx/Subscription.h \
-	wangle/deprecated/rx/types.h \
-	wangle/ssl/ClientHelloExtStats.h \
-	wangle/ssl/DHParam.h \
-	wangle/ssl/PasswordInFile.h \
-	wangle/ssl/SSLCacheOptions.h \
-	wangle/ssl/SSLCacheProvider.h \
-	wangle/ssl/SSLContextConfig.h \
-	wangle/ssl/SSLContextManager.h \
-	wangle/ssl/SSLSessionCacheManager.h \
-	wangle/ssl/SSLStats.h \
-	wangle/ssl/SSLUtil.h \
-	wangle/ssl/TLSTicketKeyManager.h \
-	wangle/ssl/TLSTicketKeySeeds.h
+	VersionCheck.h
 
 FormatTables.cpp: build/generate_format_tables.py
 	$(PYTHON) build/generate_format_tables.py
@@ -359,6 +315,8 @@ libfolly_la_SOURCES = \
 	FileUtil.cpp \
 	FingerprintTables.cpp \
 	futures/detail/ThreadWheelTimekeeper.cpp \
+	futures/Barrier.cpp \
+	futures/ThreadedExecutor.cpp \
 	futures/Future.cpp \
 	futures/InlineExecutor.cpp \
 	futures/ManualExecutor.cpp \
@@ -385,7 +343,9 @@ libfolly_la_SOURCES = \
 	io/async/EventBaseManager.cpp \
 	io/async/EventHandler.cpp \
 	io/async/SSLContext.cpp \
+	io/async/ScopedEventBaseThread.cpp \
 	io/async/HHWheelTimer.cpp \
+	io/async/test/SocketPair.cpp \
 	io/async/test/TimeUtil.cpp \
 	json.cpp \
 	detail/MemoryIdler.cpp \
@@ -413,26 +373,10 @@ libfolly_la_SOURCES = \
 	experimental/FunctionScheduler.cpp \
 	experimental/io/FsUtil.cpp \
 	experimental/JSONSchema.cpp \
+	experimental/NestedCommandLineApp.cpp \
+	experimental/ProgramOptions.cpp \
 	experimental/Select64.cpp \
-	experimental/TestUtil.cpp \
-	wangle/acceptor/Acceptor.cpp \
-	wangle/acceptor/ConnectionManager.cpp \
-	wangle/acceptor/LoadShedConfiguration.cpp \
-	wangle/acceptor/ManagedConnection.cpp \
-	wangle/acceptor/SocketOptions.cpp \
-	wangle/acceptor/TransportInfo.cpp \
-	wangle/bootstrap/ServerBootstrap.cpp \
-	wangle/channel/Pipeline.cpp \
-	wangle/concurrent/CPUThreadPoolExecutor.cpp \
-	wangle/concurrent/Codel.cpp \
-	wangle/concurrent/IOThreadPoolExecutor.cpp \
-	wangle/concurrent/GlobalExecutor.cpp \
-	wangle/concurrent/ThreadPoolExecutor.cpp \
-	wangle/ssl/PasswordInFile.cpp \
-	wangle/ssl/SSLContextManager.cpp \
-	wangle/ssl/SSLSessionCacheManager.cpp \
-	wangle/ssl/SSLUtil.cpp \
-	wangle/ssl/TLSTicketKeyManager.cpp
+	experimental/TestUtil.cpp
 
 if HAVE_LINUX
 nobase_follyinclude_HEADERS += \

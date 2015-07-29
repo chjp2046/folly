@@ -27,6 +27,7 @@
 #include <folly/Executor.h>
 #include <folly/Likely.h>
 #include <folly/IntrusiveList.h>
+#include <folly/io/async/Request.h>
 #include <folly/futures/Try.h>
 
 #include <folly/experimental/ExecutionObserver.h>
@@ -82,6 +83,11 @@ class FiberManager : public ::folly::Executor {
      * by the number of active fibers + maxFibersPoolSize.
      */
     size_t maxFibersPoolSize{1000};
+
+    /**
+     * Protect limited amount of fiber stacks with guard pages.
+     */
+    bool useGuardPages{true};
 
     constexpr Options() {}
   };
@@ -219,6 +225,13 @@ class FiberManager : public ::folly::Executor {
   bool hasActiveFiber() const;
 
   /**
+   * @return The currently running fiber or null if no fiber is executing.
+   */
+  Fiber* currentFiber() const {
+    return currentFiber_;
+  }
+
+  /**
    * @return What was the most observed fiber stack usage (in bytes).
    */
   size_t stackHighWatermark() const;
@@ -252,13 +265,17 @@ class FiberManager : public ::folly::Executor {
 
   struct RemoteTask {
     template <typename F>
-    explicit RemoteTask(F&& f) : func(std::forward<F>(f)) {}
+    explicit RemoteTask(F&& f) :
+        func(std::forward<F>(f)),
+        rcontext(RequestContext::saveContext()) {}
     template <typename F>
     RemoteTask(F&& f, const Fiber::LocalData& localData_) :
         func(std::forward<F>(f)),
-        localData(folly::make_unique<Fiber::LocalData>(localData_)) {}
+        localData(folly::make_unique<Fiber::LocalData>(localData_)),
+        rcontext(RequestContext::saveContext()) {}
     std::function<void()> func;
     std::unique_ptr<Fiber::LocalData> localData;
+    std::shared_ptr<RequestContext> rcontext;
     AtomicLinkedListHook<RemoteTask> nextRemoteTask;
   };
 

@@ -32,7 +32,7 @@ void SingletonHolder<T>::registerSingleton(CreateFunc c, TeardownFunc t) {
   std::lock_guard<std::mutex> entry_lock(mutex_);
 
   if (state_ != SingletonHolderState::NotRegistered) {
-    throw std::logic_error("Double registration");
+    LOG(FATAL) << "Double registration of singleton: " << type_.name();
   }
 
   create_ = std::move(c);
@@ -44,7 +44,8 @@ void SingletonHolder<T>::registerSingleton(CreateFunc c, TeardownFunc t) {
 template <typename T>
 void SingletonHolder<T>::registerSingletonMock(CreateFunc c, TeardownFunc t) {
   if (state_ == SingletonHolderState::NotRegistered) {
-    throw std::logic_error("Registering mock before singleton was registered");
+    LOG(FATAL)
+        << "Registering mock before singleton was registered: " << type_.name();
   }
   destroyInstance();
 
@@ -63,7 +64,9 @@ T* SingletonHolder<T>::get() {
 
   if (instance_weak_.expired()) {
     throw std::runtime_error(
-      "Raw pointer to a singleton requested after its destruction.");
+        "Raw pointer to a singleton requested after its destruction."
+        " Singleton type is: " +
+        type_.name());
   }
 
   return instance_ptr_;
@@ -119,8 +122,7 @@ void SingletonHolder<T>::createInstance() {
   // for creating_thread if it was set by other thread, but we only care about
   // it if it was set by current thread anyways.
   if (creating_thread_ == std::this_thread::get_id()) {
-    throw std::out_of_range(std::string("circular singleton dependency: ") +
-                            type_.name());
+    LOG(FATAL) << "circular singleton dependency: " << type_.name();
   }
 
   std::lock_guard<std::mutex> entry_lock(mutex_);
@@ -128,18 +130,28 @@ void SingletonHolder<T>::createInstance() {
     return;
   }
   if (state_ == SingletonHolderState::NotRegistered) {
-    throw std::out_of_range("Creating instance for unregistered singleton");
+    auto ptr = SingletonVault::stackTraceGetter().load();
+    LOG(FATAL) << "Creating instance for unregistered singleton: "
+               << type_.name() << "\n"
+               << "Stacktrace:"
+               << "\n" << (ptr ? (*ptr)() : "(not available)");
   }
 
   if (state_ == SingletonHolderState::Living) {
     return;
   }
 
+  SCOPE_EXIT {
+    // Clean up creator thread when complete, and also, in case of errors here,
+    // so that subsequent attempts don't think this is still in the process of
+    // being built.
+    creating_thread_ = std::thread::id();
+  };
+
   creating_thread_ = std::this_thread::get_id();
 
   RWSpinLock::ReadHolder rh(&vault_.stateMutex_);
   if (vault_.state_ == SingletonVault::SingletonVaultState::Quiescing) {
-    creating_thread_ = std::thread::id();
     return;
   }
 
@@ -180,7 +192,6 @@ void SingletonHolder<T>::createInstance() {
 
   instance_weak_ = instance_;
   instance_ptr_ = instance_.get();
-  creating_thread_ = std::thread::id();
   destroy_baton_ = std::move(destroy_baton);
   print_destructor_stack_trace_ = std::move(print_destructor_stack_trace);
 

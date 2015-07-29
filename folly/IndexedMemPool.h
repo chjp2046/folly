@@ -306,11 +306,11 @@ struct IndexedMemPool : boost::noncopyable {
   /// To allow use of atomic ++ instead of CAS, we let this overflow.
   /// The actual number of constructed elements is min(actualCapacity_,
   /// size_)
-  std::atomic<uint32_t> size_;
+  Atom<uint32_t> size_;
 
   /// raw storage, only 1..min(size_,actualCapacity_) (inclusive) are
   /// actually constructed.  Note that slots_[0] is not constructed or used
-  Slot* FOLLY_ALIGN_TO_AVOID_FALSE_SHARING slots_;
+  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING Slot* slots_;
 
   /// use AccessSpreader to find your list.  We use stripes instead of
   /// thread-local to avoid the need to grow or shrink on thread start
@@ -319,7 +319,7 @@ struct IndexedMemPool : boost::noncopyable {
 
   /// this is the head of a list of node chained by globalNext, that are
   /// themselves each the head of a list chained by localNext
-  AtomicStruct<TaggedPtr,Atom> FOLLY_ALIGN_TO_AVOID_FALSE_SHARING globalHead_;
+  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING AtomicStruct<TaggedPtr,Atom> globalHead_;
 
   ///////////// private methods
 

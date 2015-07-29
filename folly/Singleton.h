@@ -53,9 +53,9 @@
 // namespace {
 // struct Tag1 {};
 // struct Tag2 {};
-// folly::Singleton<MyExpensiveService> s_default();
-// folly::Singleton<MyExpensiveService, Tag1> s1();
-// folly::Singleton<MyExpensiveService, Tag2> s2();
+// folly::Singleton<MyExpensiveService> s_default;
+// folly::Singleton<MyExpensiveService, Tag1> s1;
+// folly::Singleton<MyExpensiveService, Tag2> s2;
 // }
 // ...
 // MyExpensiveService* svc_default = s_default.get();
@@ -453,12 +453,12 @@ class Singleton {
   T* operator->() { return get(); }
 
   explicit Singleton(std::nullptr_t _ = nullptr,
-                     Singleton::TeardownFunc t = nullptr) :
+                     typename Singleton::TeardownFunc t = nullptr) :
       Singleton ([]() { return new T; }, std::move(t)) {
   }
 
-  explicit Singleton(Singleton::CreateFunc c,
-                     Singleton::TeardownFunc t = nullptr) {
+  explicit Singleton(typename Singleton::CreateFunc c,
+                     typename Singleton::TeardownFunc t = nullptr) {
     if (c == nullptr) {
       throw std::logic_error(
         "nullptr_t should be passed if you want T to be default constructed");
