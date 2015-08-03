@@ -252,6 +252,14 @@ class FiberManager : public ::folly::Executor {
    */
   void setObserver(ExecutionObserver* observer);
 
+  /**
+   * Returns an estimate of the number of fibers which are waiting to run (does
+   * not include fibers or tasks scheduled remotely).
+   */
+  size_t runQueueSize() const {
+    return readyFibers_.size() + yieldedFibers_.size();
+  }
+
   static FiberManager& getFiberManager();
   static FiberManager* getFiberManagerUnsafe();
 
@@ -307,7 +315,7 @@ class FiberManager : public ::folly::Executor {
    * When we are inside FiberManager loop this points to FiberManager. Otherwise
    * it's nullptr
    */
-  static __thread FiberManager* currentFiberManager_;
+  static FOLLY_TLS FiberManager* currentFiberManager_;
 
   /**
    * runInMainContext implementation for non-void functions.
